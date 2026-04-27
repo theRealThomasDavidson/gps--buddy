@@ -1,5 +1,5 @@
 import type { IRoutingService } from './IRoutingService'
-import type { LngLat, Route, RouteProfile, RouteRequest } from '../types'
+import type { LngLat, Route, RouteDirectionStep, RouteProfile, RouteRequest } from '../types'
 
 const OSRM_DEMO_BASE = 'https://router.project-osrm.org/route/v1'
 
@@ -24,8 +24,11 @@ function encodeWaypoints(waypoints: LngLat[]): string {
  */
 export class OsrmRoutingService implements IRoutingService {
   readonly id = 'osrm-demo'
+  private readonly baseUrl: string
 
-  constructor(private readonly baseUrl: string = OSRM_DEMO_BASE) {}
+  constructor(baseUrl: string = OSRM_DEMO_BASE) {
+    this.baseUrl = baseUrl
+  }
 
   async route(request: RouteRequest, signal?: AbortSignal): Promise<Route> {
     if (request.waypoints.length < 2) {
@@ -34,7 +37,7 @@ export class OsrmRoutingService implements IRoutingService {
 
     const profile = osrmProfile(request.profile)
     const coords = encodeWaypoints(request.waypoints)
-    const url = `${this.baseUrl}/${profile}/${coords}?overview=full&geometries=geojson`
+    const url = `${this.baseUrl}/${profile}/${coords}?overview=full&geometries=geojson&steps=true`
 
     const res = await fetch(url, { signal })
     if (!res.ok) {
@@ -51,6 +54,7 @@ export class OsrmRoutingService implements IRoutingService {
       distance?: number
       duration?: number
       geometry?: { coordinates?: unknown }
+      legs?: unknown
     }
 
     const coordsRaw = first.geometry?.coordinates
@@ -71,6 +75,29 @@ export class OsrmRoutingService implements IRoutingService {
       throw new Error('Route geometry too short.')
     }
 
+    const steps: RouteDirectionStep[] = []
+    if (Array.isArray(first.legs)) {
+      for (const leg of first.legs) {
+        const legSteps = (leg as { steps?: unknown }).steps
+        if (!Array.isArray(legSteps)) continue
+        for (const s of legSteps) {
+          const step = s as {
+            distance?: number
+            duration?: number
+            name?: string
+            maneuver?: { type?: string; modifier?: string; exit?: number }
+          }
+          const instruction = formatOsrmStepInstruction(step)
+          if (!instruction) continue
+          steps.push({
+            instruction,
+            distanceMeters: typeof step.distance === 'number' ? step.distance : undefined,
+            durationSeconds: typeof step.duration === 'number' ? step.duration : undefined,
+          })
+        }
+      }
+    }
+
     return {
       id: crypto.randomUUID(),
       provider: this.id,
@@ -78,6 +105,32 @@ export class OsrmRoutingService implements IRoutingService {
       geometry,
       distanceMeters: typeof first.distance === 'number' ? first.distance : undefined,
       durationSeconds: typeof first.duration === 'number' ? first.duration : undefined,
+      steps: steps.length ? steps : undefined,
     }
   }
+}
+
+function formatOsrmStepInstruction(step: {
+  name?: string
+  maneuver?: { type?: string; modifier?: string; exit?: number }
+}): string | null {
+  const m = step.maneuver
+  const type = m?.type
+  if (typeof type !== 'string' || !type) return null
+
+  const name = typeof step.name === 'string' ? step.name.trim() : ''
+  const modifier = typeof m?.modifier === 'string' ? m.modifier.trim() : ''
+
+  if (type === 'arrive') return 'Arrive at destination'
+  if (type === 'depart') return name ? `Depart onto ${name}` : 'Depart'
+
+  if (type === 'roundabout' || type === 'rotary') {
+    const exit = typeof m?.exit === 'number' && Number.isFinite(m.exit) ? m.exit : null
+    const onto = name ? ` onto ${name}` : ''
+    return exit ? `At roundabout, take exit ${exit}${onto}` : `At roundabout, continue${onto}`
+  }
+
+  const verb = modifier ? `Continue ${modifier}` : 'Continue'
+  if (!name) return `${verb}`
+  return `${verb} onto ${name}`
 }

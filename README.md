@@ -17,6 +17,7 @@ The demo may still use public services while we validate UX and architecture; th
 
 - `web/`: the **React + TypeScript + Vite** app (the thing you run and test in the browser/phone).
 - Root `*_notes.md` and `project_checklist.md`: design notes and progress tracking for the demo.
+- `HANDOFF.md`: current “where we left off” notes for the next agent session.
 
 ## Demo vs later goals
 

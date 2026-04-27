@@ -38,7 +38,7 @@ export class ChainedGeocoder implements IGeocoder {
     const keys = new Set<string>()
 
     for (const provider of this.providers) {
-      let batch: GeocodeResult[] = []
+      let batch: GeocodeResult[]
       try {
         batch = await provider.geocode(query, signal)
       } catch {

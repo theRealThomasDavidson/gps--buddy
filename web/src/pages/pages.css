@@ -537,6 +537,48 @@
   cursor: not-allowed;
 }
 
+.page__map-directions {
+  margin-top: 0.75rem;
+}
+
+.page__map-directions-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.page__map-directions-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 12rem;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.page__map-direction + .page__map-direction {
+  border-top: 1px solid var(--border);
+}
+
+.page__map-direction {
+  padding: 0.45rem 0.55rem;
+}
+
+.page__map-direction-main {
+  font-size: 0.9rem;
+  color: var(--text-h);
+}
+
+.page__map-direction-meta {
+  margin-top: 0.15rem;
+  font-size: 0.8rem;
+  color: var(--text);
+  opacity: 0.85;
+}
+
 .page__map-trip-assign-wrap {
   flex: 0 0 auto;
   align-self: center;

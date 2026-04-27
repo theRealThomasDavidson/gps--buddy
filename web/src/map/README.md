@@ -23,7 +23,7 @@ The goal is to keep the UI SOLID:
 `MapPage` (and a future `MapPageController`) should depend only on:
 
 - `IMapDisplay`
-- `ILocationOnce` / `ILocationWatch`
+- `ILocation`
 - `IGeocoder`
 - `IRoutingService`
 - `IRouteEvaluator`

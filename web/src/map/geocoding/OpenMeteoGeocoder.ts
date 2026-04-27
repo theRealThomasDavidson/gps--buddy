@@ -36,6 +36,7 @@ export class OpenMeteoGeocoder implements IGeocoder {
     const out: GeocodeResult[] = []
     for (const r of results) {
       if (typeof r.latitude !== 'number' || typeof r.longitude !== 'number') continue
+      if (!Number.isFinite(r.latitude) || !Number.isFinite(r.longitude)) continue
       const label = [r.name, r.admin1, r.country].filter(Boolean).join(', ') || trimmed
       out.push({
         id: typeof r.id === 'number' ? String(r.id) : undefined,

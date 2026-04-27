@@ -23,6 +23,12 @@ export type RouteRequest = {
   }
 }
 
+export type RouteDirectionStep = {
+  instruction: string
+  distanceMeters?: number
+  durationSeconds?: number
+}
+
 /**
  * Normalized route shape used by the app, regardless of provider.
  * Geometry is stored as WGS84 lng/lat pairs.
@@ -34,6 +40,7 @@ export type Route = {
   geometry: LngLat[]
   distanceMeters?: number
   durationSeconds?: number
+  steps?: RouteDirectionStep[]
 }
 
 export type RouteEvaluation = {

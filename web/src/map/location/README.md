@@ -1,11 +1,11 @@
-# Location interfaces (one-shot + watch)
+# Location interface (one-shot + watch)
 
 These contracts separate **where location comes from** (browser, phone, mock)
 from how the app uses it (center map, follow route, reroute).
 
-## `ILocationOnce`
+## `ILocation`
 
-Minimal “get my current location once” interface.
+Unified location contract (one-shot + streaming).
 
 ```ts
 import type { LngLat } from '../types'
@@ -18,21 +18,10 @@ export type LocationFix = {
   speedMetersPerSecond?: number
 }
 
-export interface ILocationOnce {
-  getCurrent(signal?: AbortSignal): Promise<LocationFix>
-}
-```
-
-## `ILocationWatch`
-
-Minimal “stream location updates” interface (used for direction + live tracking demos).
-
-```ts
-import type { LocationFix } from './ILocationOnce'
-
 export type LocationWatchStop = () => void
 
-export interface ILocationWatch {
+export interface ILocation {
+  getCurrent(signal?: AbortSignal): Promise<LocationFix>
   watch(onFix: (fix: LocationFix) => void): LocationWatchStop
 }
 ```
@@ -44,5 +33,5 @@ export interface ILocationWatch {
 
 ## DI point
 
-`MapPage` (or a controller) depends on `ILocationOnce` / `ILocationWatch` and calls them to obtain fixes, then calls `IMapDisplay.setCenter(...)` / `IMapDisplay.showPositionFix(...)`.
+`MapPage` (or a controller) depends on `ILocation` and calls it to obtain fixes, then calls `IMapDisplay.setCenter(...)` / `IMapDisplay.showPositionFix(...)`.
 

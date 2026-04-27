@@ -1,15 +1,14 @@
 import { Link } from 'react-router-dom'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './pages.css'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { createMapDisplay } from '../map/createMapDisplay'
-import { BrowserLocationOnce } from '../map/location/BrowserLocationOnce'
-import { BrowserLocationWatch } from '../map/location/BrowserLocationWatch'
+import { BrowserLocation } from '../map/location/BrowserLocation'
 import { createDefaultChainedGeocoder } from '../map/geocoding/createGeocoder'
 import type { IMapDisplay, MapPin } from '../map/display/IMapDisplay'
 import { thumbtackPinGenerator } from '../map/display/ThumbtackPinGenerator'
 import { createDefaultRoutingService } from '../map/routing/createRoutingService'
-import type { LngLat } from '../map/types'
+import type { LngLat, Route } from '../map/types'
 import type { GeocodeResult } from '../map/geocoding/types'
 import {
   MAP_BANNER_LOADING_DELAY_MS,
@@ -61,23 +60,24 @@ export function MapPage() {
   const [mapReady, setMapReady] = useState(false)
   const [lastUserCoords, setLastUserCoords] = useState<LngLat | null>(null)
   const [routing, setRouting] = useState(false)
+  const [activeRoute, setActiveRoute] = useState<Route | null>(null)
   const [tripStops, setTripStops] = useState<TripStop[]>(() => [newTripStop(), newTripStop()])
   const [tripDragOverIndex, setTripDragOverIndex] = useState<number | null>(null)
   const tripDragFromRef = useRef<number | null>(null)
 
-  const locationOnce = useMemo(() => new BrowserLocationOnce(), [])
-  const locationWatch = useMemo(() => new BrowserLocationWatch(), [])
+  const location = useMemo(() => new BrowserLocation(), [])
   const geocoder = useMemo(() => createDefaultChainedGeocoder(), [])
   const router = useMemo(() => createDefaultRoutingService(), [])
 
-  const clearBannerTimer = () => {
+  const clearBannerTimer = useCallback(() => {
     if (bannerTimerRef.current) {
       clearTimeout(bannerTimerRef.current)
       bannerTimerRef.current = null
     }
-  }
+  }, [])
 
-  const scheduleLoadingBanner = (message: string): number => {
+  const scheduleLoadingBanner = useCallback(
+    (message: string): number => {
     clearBannerTimer()
     const id = ++bannerSeqRef.current
     bannerTimerRef.current = setTimeout(() => {
@@ -87,39 +87,47 @@ export function MapPage() {
       setMapBanner({ tone: 'loading', message })
     }, MAP_BANNER_LOADING_DELAY_MS)
     return id
-  }
+    },
+    [clearBannerTimer],
+  )
 
-  const showErrorBanner = (message: string) => {
+  const showErrorBanner = useCallback(
+    (message: string) => {
     clearBannerTimer()
     bannerSeqRef.current++
     setMapBannerDismissed(false)
     setMapBanner({ tone: 'error', message })
-  }
+    },
+    [clearBannerTimer],
+  )
 
-  const resolveOpBanner = (id: number, startTime: number, outcome: MapBannerResolveOutcome) => {
-    clearBannerTimer()
-    if (bannerSeqRef.current !== id) return
-    const elapsed = Date.now() - startTime
+  const resolveOpBanner = useCallback(
+    (id: number, startTime: number, outcome: MapBannerResolveOutcome) => {
+      clearBannerTimer()
+      if (bannerSeqRef.current !== id) return
+      const elapsed = Date.now() - startTime
 
-    if (outcome.kind === 'hide') {
-      setMapBanner(null)
-      return
-    }
+      if (outcome.kind === 'hide') {
+        setMapBanner(null)
+        return
+      }
 
-    if (elapsed < MAP_BANNER_MIN_VISIBLE_MS) {
-      setMapBanner(null)
-      return
-    }
+      if (elapsed < MAP_BANNER_MIN_VISIBLE_MS) {
+        setMapBanner(null)
+        return
+      }
 
-    setMapBannerDismissed(false)
-    if (outcome.kind === 'success') {
-      setMapBanner({ tone: 'success', message: outcome.message })
-      return
-    }
-    setMapBanner({ tone: 'info', message: outcome.message })
-  }
+      setMapBannerDismissed(false)
+      if (outcome.kind === 'success') {
+        setMapBanner({ tone: 'success', message: outcome.message })
+        return
+      }
+      setMapBanner({ tone: 'info', message: outcome.message })
+    },
+    [clearBannerTimer],
+  )
 
-  useEffect(() => () => clearBannerTimer(), [])
+  useEffect(() => () => clearBannerTimer(), [clearBannerTimer])
 
   useEffect(() => {
     const container = containerRef.current
@@ -135,7 +143,7 @@ export function MapPage() {
       const t0 = Date.now()
       const bid = scheduleLoadingBanner('Requesting location…')
       try {
-        const fix = await locationOnce.getCurrent()
+        const fix = await location.getCurrent()
         setLastUserCoords(fix.coords)
         display.setCenter(fix.coords, 15)
         display.showPositionFix({
@@ -146,7 +154,7 @@ export function MapPage() {
         resolveOpBanner(bid, t0, { kind: 'hide' })
 
         stopWatchRef.current?.()
-        stopWatchRef.current = locationWatch.watch((wFix) => {
+        stopWatchRef.current = location.watch((wFix) => {
           const displayNow = displayRef.current
           if (!displayNow) return
 
@@ -193,7 +201,7 @@ export function MapPage() {
       display.unmount()
       displayRef.current = null
     }
-  }, [locationOnce, locationWatch])
+  }, [location, resolveOpBanner, scheduleLoadingBanner, showErrorBanner])
 
   useEffect(() => {
     const display = displayRef.current
@@ -396,6 +404,7 @@ export function MapPage() {
       setRouting(true)
       const route = await router.route({ profile: 'drive', waypoints }, ac.signal)
       display.showRoute(route)
+      setActiveRoute(route)
       const km = (route.distanceMeters ?? 0) / 1000
       const min = Math.round((route.durationSeconds ?? 0) / 60)
       resolveOpBanner(bid, t0, {
@@ -409,6 +418,7 @@ export function MapPage() {
         return
       }
       display.showRoute(null)
+      setActiveRoute(null)
       showErrorBanner(e instanceof Error ? e.message : 'Routing failed.')
     } finally {
       setRouting(false)
@@ -419,6 +429,7 @@ export function MapPage() {
     routeAbortRef.current?.abort()
     routeAbortRef.current = null
     displayRef.current?.showRoute(null)
+    setActiveRoute(null)
     setMapBanner(null)
   }
 
@@ -568,6 +579,22 @@ export function MapPage() {
               </button>
             </div>
           </div>
+
+          {activeRoute?.steps?.length ? (
+            <div className="page__map-directions" aria-label="Directions">
+              <h3 className="page__map-directions-title">Directions</h3>
+              <ol className="page__map-directions-list">
+                {activeRoute.steps.slice(0, 40).map((s, i) => (
+                  <li key={i} className="page__map-direction">
+                    <div className="page__map-direction-main">{s.instruction}</div>
+                    <div className="page__map-direction-meta">
+                      {typeof s.distanceMeters === 'number' ? formatMeters(s.distanceMeters) : null}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ) : null}
 
           {pinned ? (
             <div className="page__map-pinned" aria-label="Pinned result">
@@ -757,5 +784,11 @@ function bearingDegrees(from: LngLat, to: LngLat) {
 function lerpAngleDegrees(from: number, to: number, t: number) {
   const delta = ((to - from + 540) % 360) - 180
   return (from + delta * t + 360) % 360
+}
+
+function formatMeters(meters: number): string {
+  if (!Number.isFinite(meters)) return ''
+  if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`
+  return `${Math.round(meters)} m`
 }
 

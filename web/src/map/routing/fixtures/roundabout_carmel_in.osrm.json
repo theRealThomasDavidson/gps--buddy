@@ -1,0 +1,17 @@
+{
+  "startQuery": "3rd Avenue SW, Carmel, IN 46032",
+  "endQuery": "Rangeline KinderCare, Carmel, IN 46032",
+  "osrmUrl": "https://router.project-osrm.org/route/v1/driving/-86.1311113,39.970001;-86.1262457,39.9662138?overview=full&geometries=geojson&steps=true",
+  "start": {
+    "lat": 39.970001,
+    "lng": -86.1311113,
+    "label": "3rd Avenue Southwest, Newark Village, Carmel, Hamilton County, Indiana, 46032, United States"
+  },
+  "end": {
+    "lat": 39.9662138,
+    "lng": -86.1262457,
+    "label": "Rangeline KinderCare, Nappanee Drive, Newark Village, Carmel, Hamilton County, Indiana, 46032, United States"
+  },
+  "note": "Fixture for roundabout/rotary instruction formatting (OSRM step maneuvers include type=roundabout). This file is not consumed at runtime."
+}
+

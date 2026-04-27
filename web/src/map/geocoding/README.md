@@ -30,6 +30,7 @@ export interface IGeocoder {
 
 ## Notes / expectations
 
+- **`OpenMeteoGeocoder`** ignores rows whose `latitude` / `longitude` are missing, non-numeric, or non-finite — defensive parsing against messy upstream JSON.
 - Public geocoders can be **rate limited** or **blocked** for heavy traffic; for production you usually want:
   - a paid provider, or
   - self-hosted Pelias/Nominatim, or
