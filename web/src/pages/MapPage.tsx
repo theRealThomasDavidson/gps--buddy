@@ -404,6 +404,7 @@ export function MapPage() {
       setRouting(true)
       const route = await router.route({ profile: 'drive', waypoints }, ac.signal)
       display.showRoute(route)
+      display.fitRoute(route)
       setActiveRoute(route)
       const km = (route.distanceMeters ?? 0) / 1000
       const min = Math.round((route.durationSeconds ?? 0) / 60)

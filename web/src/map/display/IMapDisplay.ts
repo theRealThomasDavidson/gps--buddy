@@ -29,6 +29,7 @@ export interface IMapDisplay {
   setCenter(center: LngLat, zoom?: number): void
 
   showRoute(route: Route | null): void
+  fitRoute(route: Route): void
   showPositionFix(fix: PositionFixDisplay | null): void
 
   /** Yellow pins for transient search results. */

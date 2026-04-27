@@ -1,10 +1,27 @@
+import maplibregl from 'maplibre-gl'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { RasterTileMapDisplay } from './RasterTileMapDisplay'
 
 vi.mock('maplibre-gl', () => {
   type LngLatLike = [number, number]
   type MarkerOptions = { element?: HTMLDivElement }
-  type EaseToOptions = { center: LngLatLike; zoom?: number }
+  type EaseToOptions = { center: LngLatLike; zoom?: number; bearing?: number; duration?: number }
+
+  class LngLatBounds {
+    sw: LngLatLike
+    ne: LngLatLike
+    constructor(a: LngLatLike, b: LngLatLike) {
+      this.sw = [...a] as LngLatLike
+      this.ne = [...b] as LngLatLike
+    }
+    extend(p: LngLatLike) {
+      this.sw[0] = Math.min(this.sw[0], p[0])
+      this.sw[1] = Math.min(this.sw[1], p[1])
+      this.ne[0] = Math.max(this.ne[0], p[0])
+      this.ne[1] = Math.max(this.ne[1], p[1])
+      return this
+    }
+  }
 
   class Marker {
     private el: HTMLDivElement
@@ -38,10 +55,14 @@ vi.mock('maplibre-gl', () => {
     controls: unknown[] = []
     removed = false
     easeCalls: EaseToOptions[] = []
+    fitBoundsCalls: Array<{ bounds: unknown; options: unknown }> = []
+    cameraForBoundsCalls: Array<{ bounds: unknown; options: unknown }> = []
     sources = new Set<string>()
     layers = new Set<string>()
     styleLoaded = true
     onLoadHandlers: Array<() => void> = []
+    /** When true, `cameraForBounds` returns `undefined` so production code exercises `fitBounds` fallback. */
+    cameraForBoundsReturnsUndefined = false
 
     constructor() {}
     addControl(c: unknown) {
@@ -52,6 +73,26 @@ vi.mock('maplibre-gl', () => {
     }
     easeTo(opts: EaseToOptions) {
       this.easeCalls.push(opts)
+    }
+    cameraForBounds(bounds: unknown, options: unknown) {
+      this.cameraForBoundsCalls.push({ bounds, options })
+      if (this.cameraForBoundsReturnsUndefined) return undefined
+      const box = bounds as { sw: [number, number]; ne: [number, number] }
+      const minLng = Math.min(box.sw[0], box.ne[0])
+      const maxLng = Math.max(box.sw[0], box.ne[0])
+      const minLat = Math.min(box.sw[1], box.ne[1])
+      const maxLat = Math.max(box.sw[1], box.ne[1])
+      return {
+        center: [(minLng + maxLng) / 2, (minLat + maxLat) / 2] as LngLatLike,
+        zoom: 10,
+        bearing: 0,
+      }
+    }
+    fitBounds(bounds: unknown, options: unknown) {
+      this.fitBoundsCalls.push({ bounds, options })
+    }
+    resize() {
+      // no-op; real MapLibre updates canvas size from the container
     }
     isStyleLoaded() {
       return this.styleLoaded
@@ -83,10 +124,11 @@ vi.mock('maplibre-gl', () => {
   }
 
   return {
-    default: { Map, Marker, NavigationControl },
+    default: { Map, Marker, NavigationControl, LngLatBounds },
     Map,
     Marker,
     NavigationControl,
+    LngLatBounds,
   }
 })
 
@@ -96,6 +138,11 @@ describe('RasterTileMapDisplay', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
   })
+
+  /** Route updates are flushed in a microtask; await this after `showRoute` / `fitRoute` before asserting. */
+  async function flushRouteMicrotasks() {
+    await Promise.resolve()
+  }
 
   type DisplayPrivates = {
     map: unknown
@@ -142,7 +189,8 @@ describe('RasterTileMapDisplay', () => {
     ])
   })
 
-  it('showRoute adds and clears route layers', () => {
+
+  it('showRoute adds and clears route layers', async () => {
     const d = new RasterTileMapDisplay()
     const container = document.createElement('div')
     d.mount(container)
@@ -157,13 +205,199 @@ describe('RasterTileMapDisplay', () => {
         { lng: 1, lat: 1 },
       ],
     })
+    await flushRouteMicrotasks()
 
     expect(map.sources.has('app-route-geojson')).toBe(true)
     expect(map.layers.has('app-route-line')).toBe(true)
 
     d.showRoute(null)
+    await flushRouteMicrotasks()
     expect(map.sources.has('app-route-geojson')).toBe(false)
     expect(map.layers.has('app-route-line')).toBe(false)
+  })
+
+  it('fitRoute fits bounds to the route geometry after showRoute', async () => {
+    const d = new RasterTileMapDisplay()
+    const container = document.createElement('div')
+    d.mount(container)
+
+    const map = (d as unknown as DisplayPrivates).map as {
+      cameraForBoundsCalls: Array<{ bounds: { sw: [number, number]; ne: [number, number] }; options: unknown }>
+      easeCalls: Array<{ duration?: number; maxZoom?: unknown }>
+      fitBoundsCalls: unknown[]
+    }
+
+    const route = {
+      id: 'r',
+      provider: 'x',
+      profile: 'drive' as const,
+      geometry: [
+        { lng: 0, lat: 0 },
+        { lng: 2, lat: 1 },
+      ],
+    }
+
+    d.showRoute(route)
+    d.fitRoute(route)
+    await flushRouteMicrotasks()
+
+    expect(map.cameraForBoundsCalls.length).toBe(1)
+    expect(map.fitBoundsCalls.length).toBe(0)
+    expect(map.cameraForBoundsCalls[0]?.options).toEqual(
+      expect.objectContaining({
+        maxZoom: 16,
+        padding: { top: 0, right: 0, bottom: 0, left: 0 },
+      }),
+    )
+    expect(map.easeCalls[0]).toEqual(expect.objectContaining({ duration: 650, zoom: 10, bearing: 0 }))
+
+    // Min/max of vertices, then ROUTE_FIT_GEO_PADDING_FRACTION (0.1) of span padded on each side (lng span 2, lat span 1).
+    const b = map.cameraForBoundsCalls[0]!.bounds
+    expect(b.sw[0]).toBeCloseTo(-0.2, 10)
+    expect(b.ne[0]).toBeCloseTo(2.2, 10)
+    expect(b.sw[1]).toBeCloseTo(-0.1, 10)
+    expect(b.ne[1]).toBeCloseTo(1.1, 10)
+  })
+
+  it('fitRoute passes bounds whose axis-aligned box contains every vertex (arc-like polyline)', async () => {
+    const d = new RasterTileMapDisplay()
+    const container = document.createElement('div')
+    d.mount(container)
+
+    const map = (d as unknown as DisplayPrivates).map as {
+      cameraForBoundsCalls: Array<{ bounds: { sw: [number, number]; ne: [number, number] } }>
+    }
+
+    // Quarter-circle in lng/lat: mid-arc points extend past the straight chord between endpoints.
+    const centerLng = -73.97
+    const centerLat = 40.75
+    const rDeg = 0.012
+    const geometry: Array<{ lng: number; lat: number }> = []
+    for (let i = 0; i <= 24; i++) {
+      const t = i / 24
+      const angle = (Math.PI / 2) * t
+      geometry.push({
+        lng: centerLng + rDeg * Math.cos(angle),
+        lat: centerLat + rDeg * Math.sin(angle),
+      })
+    }
+
+    const route = {
+      id: 'r',
+      provider: 'x',
+      profile: 'drive' as const,
+      geometry,
+    }
+
+    d.showRoute(route)
+    d.fitRoute(route)
+    await flushRouteMicrotasks()
+
+    expect(map.cameraForBoundsCalls.length).toBe(1)
+    const b = map.cameraForBoundsCalls[0]!.bounds
+    const minLng = Math.min(b.sw[0], b.ne[0])
+    const maxLng = Math.max(b.sw[0], b.ne[0])
+    const minLat = Math.min(b.sw[1], b.ne[1])
+    const maxLat = Math.max(b.sw[1], b.ne[1])
+
+    for (const p of geometry) {
+      expect(p.lng).toBeGreaterThanOrEqual(minLng)
+      expect(p.lng).toBeLessThanOrEqual(maxLng)
+      expect(p.lat).toBeGreaterThanOrEqual(minLat)
+      expect(p.lat).toBeLessThanOrEqual(maxLat)
+    }
+
+    // Sanity: envelope is not degenerate (arc reaches north of the chord).
+    expect(maxLat - minLat).toBeGreaterThan(rDeg * 0.35)
+  })
+
+  it('fitRoute warns and does not call camera when geometry has fewer than two points', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const d = new RasterTileMapDisplay()
+    const container = document.createElement('div')
+    d.mount(container)
+
+    const map = (d as unknown as DisplayPrivates).map as {
+      cameraForBoundsCalls: unknown[]
+      fitBoundsCalls: unknown[]
+      easeCalls: unknown[]
+    }
+
+    d.fitRoute({
+      id: 'r',
+      provider: 'x',
+      profile: 'drive',
+      geometry: [{ lng: 0, lat: 0 }],
+    })
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[route cameraForBounds] skipped: route geometry needs at least two points',
+    )
+    expect(map.cameraForBoundsCalls.length).toBe(0)
+    expect(map.fitBoundsCalls.length).toBe(0)
+    expect(map.easeCalls.length).toBe(0)
+    warnSpy.mockRestore()
+  })
+
+  it('fitRoute uses fitBounds when cameraForBounds returns undefined', () => {
+    const d = new RasterTileMapDisplay()
+    const container = document.createElement('div')
+    d.mount(container)
+
+    const map = (d as unknown as DisplayPrivates).map as {
+      cameraForBoundsReturnsUndefined: boolean
+      cameraForBoundsCalls: unknown[]
+      fitBoundsCalls: Array<{ bounds: unknown; options: unknown }>
+      easeCalls: unknown[]
+    }
+    map.cameraForBoundsReturnsUndefined = true
+
+    d.fitRoute({
+      id: 'r',
+      provider: 'x',
+      profile: 'drive' as const,
+      geometry: [
+        { lng: 0, lat: 0 },
+        { lng: 1, lat: 0 },
+      ],
+    })
+
+    expect(map.cameraForBoundsCalls.length).toBe(1)
+    expect(map.fitBoundsCalls.length).toBe(1)
+    expect(map.fitBoundsCalls[0]?.options).toEqual(
+      expect.objectContaining({
+        maxZoom: 16,
+        padding: { top: 0, right: 0, bottom: 0, left: 0 },
+        duration: 650,
+      }),
+    )
+    expect(map.easeCalls.length).toBe(0)
+  })
+
+  it('fitRoute is a no-op when the map has never been mounted', () => {
+    const d = new RasterTileMapDisplay()
+    expect(() =>
+      d.fitRoute({
+        id: 'r',
+        provider: 'x',
+        profile: 'drive',
+        geometry: [
+          { lng: 0, lat: 0 },
+          { lng: 1, lat: 1 },
+        ],
+      }),
+    ).not.toThrow()
+  })
+
+  it('applyCameraForBounds returns early when map reference is null', () => {
+    const d = new RasterTileMapDisplay()
+    const container = document.createElement('div')
+    d.mount(container)
+    const bounds = new maplibregl.LngLatBounds([0, 0], [1, 1])
+    ;(d as unknown as { map: null }).map = null
+    const apply = (d as unknown as { applyCameraForBounds: (b: maplibregl.LngLatBounds) => void })
+      .applyCameraForBounds
+    expect(() => apply.call(d, bounds)).not.toThrow()
   })
 
   it('showPositionFix creates and updates the marker element, and clears on null', () => {
@@ -417,7 +651,7 @@ describe('RasterTileMapDisplay', () => {
     ).not.toThrow()
   })
 
-  it('defers showRoute until style is loaded', () => {
+  it('defers showRoute until style is loaded', async () => {
     const d = new RasterTileMapDisplay()
     const container = document.createElement('div')
     d.mount(container)
@@ -425,19 +659,26 @@ describe('RasterTileMapDisplay', () => {
       styleLoaded: boolean
       sources: Set<string>
       layers: Set<string>
+      fitBoundsCalls: unknown[]
+      cameraForBoundsCalls: unknown[]
+      easeCalls: unknown[]
       triggerLoad: () => void
     }
     map.styleLoaded = false
 
-    d.showRoute({
+    const route = {
       id: 'r',
       provider: 'x',
-      profile: 'drive',
+      profile: 'drive' as const,
       geometry: [
         { lng: 0, lat: 0 },
         { lng: 1, lat: 1 },
       ],
-    })
+    }
+
+    d.showRoute(route)
+    d.fitRoute(route)
+    await flushRouteMicrotasks()
 
     // Nothing added yet.
     expect(map.sources.has('app-route-geojson')).toBe(false)
@@ -449,6 +690,9 @@ describe('RasterTileMapDisplay', () => {
 
     expect(map.sources.has('app-route-geojson')).toBe(true)
     expect(map.layers.has('app-route-line')).toBe(true)
+    expect(map.cameraForBoundsCalls.length).toBe(1)
+    expect(map.fitBoundsCalls.length).toBe(0)
+    expect(map.easeCalls.length).toBeGreaterThanOrEqual(1)
   })
 })
 

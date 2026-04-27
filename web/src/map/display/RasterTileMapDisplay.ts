@@ -18,6 +18,10 @@ const DEFAULT_SAVED_PIN_ACCENT = '#E11D48'
 const ROUTE_SOURCE_ID = 'app-route-geojson'
 const ROUTE_LAYER_ID = 'app-route-line'
 
+/** Geographic padding: fraction of lng/lat span added on each side before `fitBounds`. */
+const ROUTE_FIT_GEO_PADDING_FRACTION = 0.1
+const ROUTE_FIT_GEO_PADDING_MIN_SPAN_DEG = 0.004
+
 // Debug-only: when true, render the direction wedge pointing north while stationary.
 const DEBUG_LOCK_DIRECTION_WEDGE_NORTH_WHEN_STATIONARY = false
 
@@ -45,7 +49,7 @@ export class RasterTileMapDisplay implements IMapDisplay {
   }
 
   mount(container: HTMLElement) {
-    const center = this.options.initialCenter ?? { lng: -73.9857, lat: 40.7484 }
+    const center = this.options.initialCenter ?? { lng: -90, lat: 30 }
     const zoom = this.options.initialZoom ?? 12
 
     const tilesUrl =
@@ -155,6 +159,74 @@ export class RasterTileMapDisplay implements IMapDisplay {
         'line-width': 4,
         'line-opacity': 0.88,
       },
+    })
+  }
+
+  fitRoute(route: Route) {
+    const map = this.map
+    if (!map) return
+    const bounds = this.buildPaddedRouteFitBounds(route)
+    if (!bounds) {
+      console.warn('[route cameraForBounds] skipped: route geometry needs at least two points')
+      return
+    }
+    this.applyCameraForBounds(bounds)
+  }
+
+
+  private buildPaddedRouteFitBounds(route: Route): maplibregl.LngLatBounds | null {
+    if (route.geometry.length < 2) return null
+
+    let minLng = route.geometry[0]!.lng
+    let maxLng = minLng
+    let minLat = route.geometry[0]!.lat
+    let maxLat = minLat
+    for (const p of route.geometry) {
+      minLng = Math.min(minLng, p.lng)
+      maxLng = Math.max(maxLng, p.lng)
+      minLat = Math.min(minLat, p.lat)
+      maxLat = Math.max(maxLat, p.lat)
+    }
+
+    const lngSpan = Math.max(maxLng - minLng, ROUTE_FIT_GEO_PADDING_MIN_SPAN_DEG)
+    const latSpan = Math.max(maxLat - minLat, ROUTE_FIT_GEO_PADDING_MIN_SPAN_DEG)
+    const lngPad = lngSpan * ROUTE_FIT_GEO_PADDING_FRACTION
+    const latPad = latSpan * ROUTE_FIT_GEO_PADDING_FRACTION
+
+    return new maplibregl.LngLatBounds(
+      [minLng - lngPad, minLat - latPad],
+      [maxLng + lngPad, maxLat + latPad],
+    )
+  }
+
+
+  /**
+   * Uses MapLibre `Map#cameraForBounds` then `Map#easeTo` (see Map API docs). Falls back to `fitBounds` if
+   * `cameraForBounds` returns `undefined` (the library warns in that case).
+   */
+  private applyCameraForBounds(bounds: maplibregl.LngLatBounds) {
+    const map = this.map
+    if (!map) return
+
+    map.resize()
+
+    const cam = map.cameraForBounds(bounds, {
+      padding: { top: 0, right: 0, bottom: 0, left: 0 },
+      maxZoom: 16,
+    })
+
+    if (cam?.center !== undefined && cam.zoom !== undefined) {
+      map.easeTo({
+        ...cam,
+        duration: 650,
+      })
+      return
+    }
+
+    map.fitBounds(bounds, {
+      padding: { top: 0, right: 0, bottom: 0, left: 0 },
+      maxZoom: 16,
+      duration: 650,
     })
   }
 

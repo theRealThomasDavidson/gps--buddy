@@ -46,6 +46,7 @@ export interface IMapDisplay {
   setCenter(center: LngLat, zoom?: number): void
 
   showRoute(route: Route | null): void
+  fitRoute(route: Route): void
   showPositionFix(fix: PositionFixDisplay | null): void
 
   /** Transient pins (e.g. geocode search results). */
@@ -64,6 +65,11 @@ export interface IMapDisplay {
 
 - **User location marker**: default MapLibre marker anchor is **`center`**, so a lat/lng corresponds to the **visual center** of the marker element.
 - **Address pins**: marker anchor is **`bottom`**, so a lat/lng corresponds to the **bottom of the short metal stem** under the spool cap.
+
+## Route framing
+
+- **`showRoute(route)`** (`RasterTileMapDisplay`): if the map style is not ready yet, registers **`map.once('load', () => showRoute(route))`** and returns; when loaded, removes any existing route source/layer, then adds GeoJSON + line layer (or clears only if `route` is `null`).
+- **`fitRoute(route)`** (`RasterTileMapDisplay`): **independent** of `showRoute`—no shared queue or microtask batching. It builds an axis-aligned bbox over all vertices, expands each axis by **`ROUTE_FIT_GEO_PADDING_FRACTION` (0.1)** of that axis’s span (with a small **minimum span in degrees** so degenerate lines still frame), then calls **`Map#resize`**, **`Map#cameraForBounds`** with **zero** viewport `padding` and **`maxZoom: 16`**, then **`Map#easeTo`** for **650 ms** (falls back to **`fitBounds`** with the same options if `cameraForBounds` returns nothing). Callers that need the line drawn before fitting (e.g. `MapPage`) should call **`showRoute` then `fitRoute`** in that order on the same tick.
 
 ## Dynamic pin graphics
 
