@@ -31,10 +31,9 @@ export interface IMapDisplay {
   showRoute(route: Route | null): void
   fitRoute(route: Route): void
   showPositionFix(fix: PositionFixDisplay | null): void
+  setUserMapInteractionHandler(handler: (() => void) | null): void
 
-  /** Yellow pins for transient search results. */
   setSearchPins(pins: MapPin[]): void
-  /** Thumbtack-style pins for saved addresses. */
   setSavedPins(pins: MapPin[]): void
 }
 

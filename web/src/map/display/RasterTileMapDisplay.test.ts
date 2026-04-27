@@ -51,7 +51,8 @@ vi.mock('maplibre-gl', () => {
     constructor() {}
   }
 
-  class Map {
+  /** Test double for `maplibregl.Map`; internal name avoids clashing with the built-in `Map` type. */
+  class MockCartoMap {
     controls: unknown[] = []
     removed = false
     easeCalls: EaseToOptions[] = []
@@ -61,7 +62,7 @@ vi.mock('maplibre-gl', () => {
     layers = new Set<string>()
     styleLoaded = true
     onLoadHandlers: Array<() => void> = []
-    /** When true, `cameraForBounds` returns `undefined` so production code exercises `fitBounds` fallback. */
+    private handlers = new Map<string, Array<(e: unknown) => void>>()
     cameraForBoundsReturnsUndefined = false
 
     constructor() {}
@@ -121,11 +122,25 @@ vi.mock('maplibre-gl', () => {
     removeLayer(id: string) {
       this.layers.delete(id)
     }
+    on(event: string, fn: (e: unknown) => void) {
+      const list = this.handlers.get(event) ?? []
+      list.push(fn)
+      this.handlers.set(event, list)
+    }
+    off(event: string, fn: (e: unknown) => void) {
+      const list = this.handlers.get(event)
+      if (!list) return
+      const i = list.indexOf(fn)
+      if (i >= 0) list.splice(i, 1)
+    }
+    emit(event: string, payload: unknown) {
+      this.handlers.get(event)?.forEach((fn) => fn(payload))
+    }
   }
 
   return {
-    default: { Map, Marker, NavigationControl, LngLatBounds },
-    Map,
+    default: { Map: MockCartoMap, Marker, NavigationControl, LngLatBounds },
+    Map: MockCartoMap,
     Marker,
     NavigationControl,
     LngLatBounds,
@@ -162,6 +177,30 @@ describe('RasterTileMapDisplay', () => {
 
     d.unmount()
     expect(() => d.unmount()).not.toThrow()
+  })
+
+  it('setUserMapInteractionHandler fires only for events with originalEvent', () => {
+    const d = new RasterTileMapDisplay()
+    const container = document.createElement('div')
+    d.mount(container)
+
+    const fn = vi.fn()
+    d.setUserMapInteractionHandler(fn)
+
+    const map = (d as unknown as DisplayPrivates).map as {
+      emit: (event: string, payload: unknown) => void
+    }
+
+    map.emit('dragstart', { originalEvent: new MouseEvent('mousedown') })
+    expect(fn).toHaveBeenCalledTimes(1)
+
+    map.emit('dragstart', { originalEvent: undefined })
+    map.emit('dragstart', {})
+    expect(fn).toHaveBeenCalledTimes(1)
+
+    d.setUserMapInteractionHandler(null)
+    map.emit('dragstart', { originalEvent: new MouseEvent('mousedown') })
+    expect(fn).toHaveBeenCalledTimes(1)
   })
 
   it('setBaseView ignores non-roads views for the raster basemap', () => {

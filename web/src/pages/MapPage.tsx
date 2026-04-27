@@ -64,6 +64,8 @@ export function MapPage() {
   const [tripStops, setTripStops] = useState<TripStop[]>(() => [newTripStop(), newTripStop()])
   const [tripDragOverIndex, setTripDragOverIndex] = useState<number | null>(null)
   const tripDragFromRef = useRef<number | null>(null)
+  const followMyLocationRef = useRef(false)
+  const [followingMyLocation, setFollowingMyLocation] = useState(false)
 
   const location = useMemo(() => new BrowserLocation(), [])
   const geocoder = useMemo(() => createDefaultChainedGeocoder(), [])
@@ -127,6 +129,23 @@ export function MapPage() {
     [clearBannerTimer],
   )
 
+  const stopFollowingMyLocation = useCallback(() => {
+    followMyLocationRef.current = false
+    setFollowingMyLocation(false)
+  }, [])
+
+  const toggleFollowMyLocation = useCallback(() => {
+    const display = displayRef.current
+    if (!display || !lastUserCoords) return
+    if (followMyLocationRef.current) {
+      stopFollowingMyLocation()
+      return
+    }
+    followMyLocationRef.current = true
+    setFollowingMyLocation(true)
+    display.setCenter(lastUserCoords, 15)
+  }, [lastUserCoords, stopFollowingMyLocation])
+
   useEffect(() => () => clearBannerTimer(), [clearBannerTimer])
 
   useEffect(() => {
@@ -136,6 +155,10 @@ export function MapPage() {
     const display = createMapDisplay({ kind: 'raster' })
     displayRef.current = display
     display.mount(container)
+    display.setUserMapInteractionHandler(() => {
+      followMyLocationRef.current = false
+      setFollowingMyLocation(false)
+    })
     setMapReady(true)
 
     // Demo behavior: center once on initial load.
@@ -177,6 +200,10 @@ export function MapPage() {
           prevFixRef.current = { coords: wFix.coords, timestampMs: wFix.timestampMs }
           setLastUserCoords(wFix.coords)
 
+          if (followMyLocationRef.current) {
+            displayNow.setCenter(wFix.coords)
+          }
+
           displayNow.showPositionFix({
             coords: wFix.coords,
             bearingDegrees: smoothedBearingRef.current ?? undefined,
@@ -198,6 +225,8 @@ export function MapPage() {
       geocodeAbortRef.current = null
       prevFixRef.current = null
       smoothedBearingRef.current = null
+      followMyLocationRef.current = false
+      display.setUserMapInteractionHandler(null)
       display.unmount()
       displayRef.current = null
     }
@@ -242,13 +271,6 @@ export function MapPage() {
     persistSavedPlacesV1(savedPlaces)
   }, [savedPlaces])
 
-  /** Recenters on the last known fix from watch / initial load — does not call geolocation again. */
-  function centerOnMeOnce() {
-    const display = displayRef.current
-    if (!display || !lastUserCoords) return
-    display.setCenter(lastUserCoords, 15)
-  }
-
   async function searchAddress() {
     const q = addressQuery.trim()
     if (!q) {
@@ -278,6 +300,7 @@ export function MapPage() {
 
       const display = displayRef.current
       if (display && results.length > 0) {
+        stopFollowingMyLocation()
         display.setCenter(results[0].center, 15)
       }
     } catch (e) {
@@ -297,6 +320,7 @@ export function MapPage() {
     const display = displayRef.current
     if (!display) return
 
+    stopFollowingMyLocation()
     setPinned(result)
     display.setCenter(result.center, 16)
     // Keep the user marker as the “live location” marker; address selection just recenters for now.
@@ -324,6 +348,7 @@ export function MapPage() {
   function flyToSavedPlace(place: SavedPlaceV1) {
     const display = displayRef.current
     if (!display) return
+    stopFollowingMyLocation()
     display.setCenter(place.center, 16)
   }
 
@@ -403,6 +428,7 @@ export function MapPage() {
     try {
       setRouting(true)
       const route = await router.route({ profile: 'drive', waypoints }, ac.signal)
+      stopFollowingMyLocation()
       display.showRoute(route)
       display.fitRoute(route)
       setActiveRoute(route)
@@ -445,11 +471,18 @@ export function MapPage() {
         <div className="page__map-tools" aria-label="Map tools">
           <button
             type="button"
-            onClick={centerOnMeOnce}
+            onClick={toggleFollowMyLocation}
             disabled={!lastUserCoords}
-            title={!lastUserCoords ? 'Need a location fix first (no cached position yet)' : 'Center map on last known position'}
+            aria-pressed={followingMyLocation}
+            title={
+              !lastUserCoords
+                ? 'Need a location fix first (no cached position yet)'
+                : followingMyLocation
+                  ? 'Stop keeping the map centered on your position'
+                  : 'Center on your position and keep following as you move'
+            }
           >
-            Center on me
+            {followingMyLocation ? 'Following' : 'Center on me'}
           </button>
         </div>
 

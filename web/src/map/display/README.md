@@ -53,6 +53,9 @@ export interface IMapDisplay {
   setSearchPins(pins: MapPin[]): void
   /** Persistent-ish pins (e.g. saved addresses). */
   setSavedPins(pins: MapPin[]): void
+
+  /** User-driven pan / zoom (not programmatic `setCamera`); used to disable “follow my location”. */
+  setUserMapInteractionHandler(handler: (() => void) | null): void
 }
 ```
 

@@ -43,6 +43,11 @@ export class RasterTileMapDisplay implements IMapDisplay {
   private readonly searchMarkers = new Map<string, maplibregl.Marker>()
   private readonly savedMarkers = new Map<string, maplibregl.Marker>()
   private readonly options: RasterTileMapDisplayOptions
+  private userMapInteractionHandler: (() => void) | null = null
+  private readonly onUserMapInput = (e: { originalEvent?: Event | null }) => {
+    if (e.originalEvent == null) return
+    this.userMapInteractionHandler?.()
+  }
 
   constructor(options: RasterTileMapDisplayOptions = {}) {
     this.options = options
@@ -87,9 +92,16 @@ export class RasterTileMapDisplay implements IMapDisplay {
     })
 
     this.map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }))
+    this.map.on('dragstart', this.onUserMapInput)
+    this.map.on('wheel', this.onUserMapInput)
   }
 
   unmount() {
+    if (this.map) {
+      this.map.off('dragstart', this.onUserMapInput)
+      this.map.off('wheel', this.onUserMapInput)
+    }
+    this.userMapInteractionHandler = null
     this.positionMarker?.remove()
     this.positionMarker = null
     this.arrowEl = null
@@ -366,6 +378,10 @@ export class RasterTileMapDisplay implements IMapDisplay {
       marker.remove()
       markerMap.delete(id)
     }
+  }
+
+  setUserMapInteractionHandler(handler: (() => void) | null): void {
+    this.userMapInteractionHandler = handler
   }
 }
 
