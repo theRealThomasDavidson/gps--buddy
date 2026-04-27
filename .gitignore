@@ -1,0 +1,29 @@
+# Secrets and local env (keep examples tracked as *.example if you add them)
+.env
+.env.*
+!.env.example
+
+# OS noise (Windows)
+Thumbs.db
+Desktop.ini
+
+# Node / tooling outputs
+**/node_modules/
+**/dist/
+**/build/
+**/.vite/
+coverage/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Editor noise
+.idea/
+
+# Optional: editor — uncomment if you do not want team-shared VS Code settings
+# .vscode/
+
+# Root-only markdown (personal notes)
+/*notes.md
+/*checklist.md
