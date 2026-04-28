@@ -64,16 +64,11 @@ export class BasicRouteProgressor implements IRouteProgressor {
       this.opts.searchBackMeters,
       cappedForwardMeters,
     )
-    const localBest =
-      localRange.startIndex <= localRange.endIndex
-        ? projectToBestSegment(geom, cumulative, fix.coords, localRange.startIndex, localRange.endIndex)
-        : null
+    const localBest = projectToBestSegment(geom, cumulative, fix.coords, localRange.startIndex, localRange.endIndex)
 
     // Hysteresis: prefer local match unless global is meaningfully closer.
     const chosen =
-      localBest && localBest.distanceToRouteMeters <= globalBest.distanceToRouteMeters + this.opts.switchMarginMeters
-        ? localBest
-        : globalBest
+      localBest.distanceToRouteMeters <= globalBest.distanceToRouteMeters + this.opts.switchMarginMeters ? localBest : globalBest
 
     const unclamped = toProgress(chosen)
     const clamped = clampProgress(unclamped, last, this.opts, memory.lastFix, fix, geom, cumulative)

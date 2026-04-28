@@ -73,12 +73,10 @@ vi.mock('maplibre-gl', () => {
     onLoadHandlers: Array<() => void> = []
     private handlers = new Map<string, Array<(e: unknown) => void>>()
     cameraForBoundsReturnsUndefined = false
+    cameraForBoundsThrows = false
+    jumpToThrows = false
 
     constructor() {}
-    stop() {
-      // no-op; real MapLibre cancels in-flight camera transitions
-      return this
-    }
     addControl(c: unknown) {
       this.controls.push(c)
     }
@@ -92,10 +90,12 @@ vi.mock('maplibre-gl', () => {
       this.flyCalls.push(opts)
     }
     jumpTo(opts: EaseToOptions) {
+      if (this.jumpToThrows) throw new Error('jumpTo failed')
       this.jumpCalls.push(opts)
     }
     cameraForBounds(bounds: unknown, options: unknown) {
       this.cameraForBoundsCalls.push({ bounds, options })
+      if (this.cameraForBoundsThrows) throw new Error('cameraForBounds failed')
       if (this.cameraForBoundsReturnsUndefined) return undefined
       const box = bounds as { sw: [number, number]; ne: [number, number] }
       const minLng = Math.min(box.sw[0], box.ne[0])
@@ -116,6 +116,9 @@ vi.mock('maplibre-gl', () => {
     }
     isStyleLoaded() {
       return this.styleLoaded
+    }
+    loaded() {
+      return true
     }
     once(event: string, cb: () => void) {
       if (event === 'load') this.onLoadHandlers.push(cb)
@@ -245,6 +248,92 @@ describe('RasterTileMapDisplay', () => {
       { center: [1, 2] },
       { center: [3, 4], zoom: 9 },
     ])
+  })
+
+  it('setCenter is a no-op for non-finite center/zoom', () => {
+    const d = new RasterTileMapDisplay()
+    const container = document.createElement('div')
+    d.mount(container)
+    const map = (d as unknown as DisplayPrivates).map as { easeCalls: Array<unknown> }
+
+    d.setCenter({ lng: Number.NaN, lat: 2 })
+    d.setCenter({ lng: 1, lat: Number.POSITIVE_INFINITY })
+    d.setCenter({ lng: 1, lat: 2 }, Number.NaN)
+
+    expect(map.easeCalls.length).toBe(0)
+  })
+
+  it('setNavCamera omits zoom when non-finite, even if pitch jump applies', () => {
+    const d = new RasterTileMapDisplay()
+    const container = document.createElement('div')
+    d.mount(container)
+    const map = (d as unknown as DisplayPrivates).map as { jumpCalls: Array<{ zoom?: unknown }> }
+
+    d.setNavCamera({ center: { lng: 1, lat: 2 }, zoom: Number.NaN, pitchDegrees: 55, transition: 'ease', durationMs: 200 })
+
+    expect(map.jumpCalls.length).toBe(1)
+    expect(map.jumpCalls[0]).toEqual(expect.not.objectContaining({ zoom: expect.anything() }))
+  })
+
+  it('setNavCamera falls back to setCenter when pitchDegrees is missing or NaN', () => {
+    const d = new RasterTileMapDisplay()
+    const container = document.createElement('div')
+    d.mount(container)
+    const map = (d as unknown as DisplayPrivates).map as { jumpCalls: unknown[]; easeCalls: Array<{ center?: unknown; zoom?: unknown }> }
+
+    d.setNavCamera({ center: { lng: 1, lat: 2 }, zoom: 12, transition: 'ease', durationMs: 200 })
+    d.setNavCamera({ center: { lng: 3, lat: 4 }, zoom: 12, pitchDegrees: Number.NaN, transition: 'ease', durationMs: 200 })
+
+    expect(map.jumpCalls.length).toBe(0)
+    expect(map.easeCalls.length).toBeGreaterThanOrEqual(2)
+    expect(map.easeCalls[0]).toEqual(expect.objectContaining({ center: [1, 2], zoom: 12 }))
+    expect(map.easeCalls[1]).toEqual(expect.objectContaining({ center: [3, 4], zoom: 12 }))
+  })
+
+  it('setNavCamera falls back to setCenter when map is not ready', () => {
+    const d = new RasterTileMapDisplay()
+    const container = document.createElement('div')
+    d.mount(container)
+    const map = (d as unknown as DisplayPrivates).map as { styleLoaded: boolean; easeCalls: Array<{ center?: unknown; zoom?: unknown }> }
+    map.styleLoaded = false
+
+    d.setNavCamera({ center: { lng: 1, lat: 2 }, zoom: 12, pitchDegrees: 55, transition: 'ease', durationMs: 200 })
+
+    expect(map.easeCalls[0]).toEqual(expect.objectContaining({ center: [1, 2], zoom: 12 }))
+  })
+
+  it('setNavCamera uses jumpTo once for pitch, then uses setCenter when pitch unchanged', () => {
+    const d = new RasterTileMapDisplay()
+    const container = document.createElement('div')
+    d.mount(container)
+    const map = (d as unknown as DisplayPrivates).map as {
+      jumpCalls: Array<{ pitch?: unknown; center?: unknown; zoom?: unknown }>
+      easeCalls: Array<{ center?: unknown; zoom?: unknown }>
+    }
+
+    d.setNavCamera({ center: { lng: 1, lat: 2 }, zoom: 12, pitchDegrees: 55, transition: 'ease', durationMs: 200 })
+    d.setNavCamera({ center: { lng: 3, lat: 4 }, zoom: 12, pitchDegrees: 55, transition: 'ease', durationMs: 200 })
+
+    expect(map.jumpCalls.length).toBe(1)
+    expect(map.jumpCalls[0]).toEqual(expect.objectContaining({ pitch: 55, center: [1, 2], zoom: 12 }))
+    expect(map.easeCalls.length).toBeGreaterThanOrEqual(1)
+    expect(map.easeCalls[0]).toEqual(expect.objectContaining({ center: [3, 4], zoom: 12 }))
+  })
+
+  it('setNavCamera falls back to setCenter when jumpTo throws', () => {
+    const d = new RasterTileMapDisplay()
+    const container = document.createElement('div')
+    d.mount(container)
+    const map = (d as unknown as DisplayPrivates).map as {
+      jumpToThrows: boolean
+      easeCalls: Array<{ center?: unknown; zoom?: unknown }>
+    }
+    map.jumpToThrows = true
+
+    d.setNavCamera({ center: { lng: 1, lat: 2 }, zoom: 12, pitchDegrees: 55, transition: 'ease', durationMs: 200 })
+
+    expect(map.easeCalls.length).toBeGreaterThanOrEqual(1)
+    expect(map.easeCalls[0]).toEqual(expect.objectContaining({ center: [1, 2], zoom: 12 }))
   })
 
 
@@ -447,6 +536,35 @@ describe('RasterTileMapDisplay', () => {
         ],
       }),
     ).not.toThrow()
+  })
+
+  it('setNavCamera is a no-op when the map has never been mounted', () => {
+    const d = new RasterTileMapDisplay()
+    expect(() =>
+      d.setNavCamera({ center: { lng: 1, lat: 2 }, zoom: 12, pitchDegrees: 55, transition: 'ease', durationMs: 200 }),
+    ).not.toThrow()
+  })
+
+  it('fitRoute is a no-op when cameraForBounds throws', async () => {
+    const d = new RasterTileMapDisplay()
+    const container = document.createElement('div')
+    d.mount(container)
+    const map = (d as unknown as DisplayPrivates).map as { cameraForBoundsThrows: boolean; fitBoundsCalls: unknown[]; jumpCalls: unknown[] }
+    map.cameraForBoundsThrows = true
+
+    d.fitRoute({
+      id: 'r',
+      provider: 'x',
+      profile: 'drive' as const,
+      geometry: [
+        { lng: 0, lat: 0 },
+        { lng: 1, lat: 0 },
+      ],
+    })
+    await flushRouteMicrotasks()
+
+    expect(map.jumpCalls.length).toBe(0)
+    expect(map.fitBoundsCalls.length).toBe(0)
   })
 
   it('applyCameraForBounds returns early when map reference is null', () => {

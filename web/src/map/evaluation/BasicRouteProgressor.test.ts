@@ -117,6 +117,21 @@ describe('BasicRouteProgressor', () => {
     expect(second.progress.metersAlongRoute).toBeLessThanOrEqual(first.progress.metersAlongRoute + 0.001)
   })
 
+  it('does not clamp backward progress when within maxBackwardProgressMetersPerFix', () => {
+    const prog = new BasicRouteProgressor({
+      maxBackwardProgressMetersPerFix: 80,
+      progressEpsilonMeters: 1,
+    })
+    const r = route([p0(), addMetersLL(p0(), 1000, 0)])
+
+    const first = prog.project(r, fix(addMetersLL(p0(), 200, 0), 0), { last: null, lastFix: null })
+    // Backwards by 20m, but within maxBackwardProgressMetersPerFix => no clamp branch.
+    const second = prog.project(r, fix(addMetersLL(p0(), 180, 0), 1000), first.memory)
+
+    expect(second.progress.metersAlongRoute).toBeLessThan(first.progress.metersAlongRoute)
+    expect(second.progress.metersAlongRoute).toBeGreaterThanOrEqual(first.progress.metersAlongRoute - 25)
+  })
+
   it('distance-window search is based on meters, so dense segments do not break progress', () => {
     const prog = new BasicRouteProgressor({
       searchBackMeters: 10,
@@ -153,6 +168,78 @@ describe('BasicRouteProgressor', () => {
 
     expect(second.progress.metersAlongRoute).toBeLessThan(20)
     expect(second.progress.metersAlongRoute).toBeGreaterThanOrEqual(0)
+  })
+
+  it('does not apply forward cap when speed is missing/NaN', () => {
+    const prog = new BasicRouteProgressor()
+    const r = route([p0(), addMetersLL(p0(), 1000, 0)])
+
+    const first = prog.project(r, fix(addMetersLL(p0(), 0, 0), 1000, 5), { last: null, lastFix: null })
+
+    // Next fix has no speed => cap disabled; progress can jump forward.
+    const second = prog.project(r, { coords: addMetersLL(p0(), 500, 0), timestampMs: 2000 }, first.memory)
+    expect(second.progress.metersAlongRoute).toBeGreaterThan(200)
+  })
+
+  it('does not apply forward cap when speed is NaN', () => {
+    const prog = new BasicRouteProgressor()
+    const r = route([p0(), addMetersLL(p0(), 1000, 0)])
+
+    const first = prog.project(r, fix(addMetersLL(p0(), 0, 0), 1000, 5), { last: null, lastFix: null })
+    const second = prog.project(
+      r,
+      { coords: addMetersLL(p0(), 500, 0), timestampMs: 2000, speedMetersPerSecond: Number.NaN },
+      first.memory,
+    )
+    expect(second.progress.metersAlongRoute).toBeGreaterThan(200)
+  })
+
+  it('does not apply forward cap when timestamp does not advance', () => {
+    const prog = new BasicRouteProgressor()
+    const r = route([p0(), addMetersLL(p0(), 1000, 0)])
+
+    const first = prog.project(r, fix(addMetersLL(p0(), 0, 0), 1000, 5), { last: null, lastFix: null })
+    // Same timestamp => dtSec <= 0 => cap disabled.
+    const second = prog.project(r, fix(addMetersLL(p0(), 500, 0), 1000, 1), first.memory)
+    expect(second.progress.metersAlongRoute).toBeGreaterThan(200)
+  })
+
+  it('handles zero-length segments (duplicate points) without NaN progress', () => {
+    const prog = new BasicRouteProgressor()
+    const o = p0()
+    const dup = addMetersLL(o, 0, 0)
+    const end = addMetersLL(o, 100, 0)
+    const r = route([o, dup, end])
+
+    const out = prog.project(r, fix(addMetersLL(o, 10, 5), 0), { last: null, lastFix: null })
+    expect(Number.isFinite(out.progress.metersAlongRoute)).toBe(true)
+    expect(Number.isFinite(out.progress.distanceToRouteMeters)).toBe(true)
+  })
+
+  it('forward-cap clamp works with an initial zero-length segment', () => {
+    const prog = new BasicRouteProgressor()
+    const o = p0()
+    const dup = addMetersLL(o, 0, 0)
+    const end = addMetersLL(o, 100, 0)
+    const r = route([o, dup, end])
+
+    const first = prog.project(r, fix(addMetersLL(o, 0, 0), 0, 1), { last: null, lastFix: null })
+
+    // Very small dt => very small max forward. With a zero-length first segment, clamping needs to stay finite.
+    const second = prog.project(r, fix(addMetersLL(o, 80, 0), 10, 0.1), first.memory)
+    expect(Number.isFinite(second.progress.metersAlongRoute)).toBe(true)
+    expect(second.progress.metersAlongRoute).toBeLessThan(2)
+  })
+
+  it('does not attempt forward-cap when memory.lastFix is missing', () => {
+    const prog = new BasicRouteProgressor()
+    const r = route([p0(), addMetersLL(p0(), 1000, 0)])
+
+    const first = prog.project(r, fix(addMetersLL(p0(), 0, 0), 0, 5), { last: null, lastFix: null })
+    const memoryWithoutFix = { ...first.memory, lastFix: null }
+
+    const second = prog.project(r, fix(addMetersLL(p0(), 500, 0), 1000, 1), memoryWithoutFix)
+    expect(second.progress.metersAlongRoute).toBeGreaterThan(200)
   })
 })
 
