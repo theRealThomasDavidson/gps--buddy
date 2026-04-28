@@ -11,6 +11,9 @@ const DEFAULTS: RouteProgressorOptions = {
   progressEpsilonMeters: 1,
 }
 
+const FORWARD_CAP_MIN_SPEED_MPS = 8.94 // 20 mph
+const FORWARD_CAP_FACTOR = 1.5
+
 type SegmentProjection = {
   segmentIndex: number
   snapped: LngLat
@@ -41,7 +44,7 @@ export class BasicRouteProgressor implements IRouteProgressor {
         metersAlongRoute: 0,
         distanceToRouteMeters: 0,
       }
-      return { progress, memory: { last: progress } }
+      return { progress, memory: { last: progress, lastFix: fix } }
     }
 
     const cumulative = buildCumulativeMeters(geom)
@@ -51,10 +54,16 @@ export class BasicRouteProgressor implements IRouteProgressor {
     const last = memory.last
     if (!last) {
       const progress = toProgress(globalBest)
-      return { progress, memory: { last: progress } }
+      return { progress, memory: { last: progress, lastFix: fix } }
     }
 
-    const localRange = segmentRangeForDistanceWindow(cumulative, last.metersAlongRoute, this.opts.searchBackMeters, this.opts.searchForwardMeters)
+    const cappedForwardMeters = forwardCapMeters(memory.lastFix, fix, this.opts.searchForwardMeters)
+    const localRange = segmentRangeForDistanceWindow(
+      cumulative,
+      last.metersAlongRoute,
+      this.opts.searchBackMeters,
+      cappedForwardMeters,
+    )
     const localBest =
       localRange.startIndex <= localRange.endIndex
         ? projectToBestSegment(geom, cumulative, fix.coords, localRange.startIndex, localRange.endIndex)
@@ -67,8 +76,8 @@ export class BasicRouteProgressor implements IRouteProgressor {
         : globalBest
 
     const unclamped = toProgress(chosen)
-    const clamped = clampProgress(unclamped, last, this.opts)
-    return { progress: clamped, memory: { last: clamped } }
+    const clamped = clampProgress(unclamped, last, this.opts, memory.lastFix, fix, geom, cumulative)
+    return { progress: clamped, memory: { last: clamped, lastFix: fix } }
   }
 }
 
@@ -81,12 +90,46 @@ function toProgress(p: SegmentProjection): RouteFollowerProgress {
   }
 }
 
-function clampProgress(next: RouteFollowerProgress, prev: RouteFollowerProgress, opts: RouteProgressorOptions): RouteFollowerProgress {
+function clampProgress(
+  next: RouteFollowerProgress,
+  prev: RouteFollowerProgress,
+  opts: RouteProgressorOptions,
+  prevFix: LocationFix | null,
+  fix: LocationFix,
+  geom: LngLat[],
+  cumulative: number[],
+): RouteFollowerProgress {
   const delta = next.metersAlongRoute - prev.metersAlongRoute
-  if (delta >= -opts.progressEpsilonMeters) return next
-  const clampedMeters = Math.max(prev.metersAlongRoute - opts.maxBackwardProgressMetersPerFix, next.metersAlongRoute)
-  if (clampedMeters === next.metersAlongRoute) return next
-  return { ...next, metersAlongRoute: clampedMeters }
+
+  // Backward jitter clamp.
+  if (delta < -opts.progressEpsilonMeters) {
+    const clampedMeters = Math.max(prev.metersAlongRoute - opts.maxBackwardProgressMetersPerFix, next.metersAlongRoute)
+    if (clampedMeters !== next.metersAlongRoute) {
+      const snapped = progressPointAtMeters(geom, cumulative, clampedMeters)
+      return {
+        ...next,
+        ...snapped,
+        metersAlongRoute: clampedMeters,
+        distanceToRouteMeters: haversineMeters(fix.coords, snapped.snappedCoords),
+      }
+    }
+    return next
+  }
+
+  // Optional speed/time based forward clamp (avoids teleporting forward along the route).
+  const maxForward = maxForwardMeters(prevFix, fix)
+  if (maxForward !== null && delta > maxForward + opts.progressEpsilonMeters) {
+    const clampedMeters = prev.metersAlongRoute + maxForward
+    const snapped = progressPointAtMeters(geom, cumulative, clampedMeters)
+    return {
+      ...next,
+      ...snapped,
+      metersAlongRoute: clampedMeters,
+      distanceToRouteMeters: haversineMeters(fix.coords, snapped.snappedCoords),
+    }
+  }
+
+  return next
 }
 
 function buildCumulativeMeters(geom: LngLat[]): number[] {
@@ -106,6 +149,38 @@ function segmentRangeForDistanceWindow(cumulative: number[], atMeters: number, b
   const endIndex = Math.max(0, Math.min(cumulative.length - 2, endVertex))
   if (endIndex < startIndex) return { startIndex, endIndex: startIndex }
   return { startIndex, endIndex }
+}
+
+function forwardCapMeters(prevFix: LocationFix | null, fix: LocationFix, searchForwardMeters: number): number {
+  const maxForward = maxForwardMeters(prevFix, fix)
+  if (maxForward === null) return searchForwardMeters
+  return Math.min(searchForwardMeters, maxForward)
+}
+
+function maxForwardMeters(prevFix: LocationFix | null, fix: LocationFix): number | null {
+  if (!prevFix) return null
+  const speed = fix.speedMetersPerSecond
+  if (typeof speed !== 'number' || !Number.isFinite(speed)) return null
+  const dtSec = (fix.timestampMs - prevFix.timestampMs) / 1000
+  if (!(dtSec > 0)) return null
+  const capSpeedMps = Math.max(speed, FORWARD_CAP_MIN_SPEED_MPS)
+  return capSpeedMps * dtSec * FORWARD_CAP_FACTOR
+}
+
+function progressPointAtMeters(
+  geom: LngLat[],
+  cumulative: number[],
+  metersAlongRoute: number,
+): Pick<RouteFollowerProgress, 'snappedCoords' | 'segmentIndex'> {
+  const m = Math.max(0, Math.min(cumulative[cumulative.length - 1], metersAlongRoute))
+  const i = Math.max(0, Math.min(geom.length - 2, upperBound(cumulative, m) - 1))
+  const segStartM = cumulative[i]
+  const segEndM = cumulative[i + 1]
+  const t = segEndM === segStartM ? 0 : (m - segStartM) / (segEndM - segStartM)
+  const a = geom[i]
+  const b = geom[i + 1]
+  const snappedCoords: LngLat = { lng: a.lng + (b.lng - a.lng) * t, lat: a.lat + (b.lat - a.lat) * t }
+  return { snappedCoords, segmentIndex: i }
 }
 
 function projectToBestSegment(geom: LngLat[], cumulative: number[], point: LngLat, startIndex: number, endIndex: number): SegmentProjection {

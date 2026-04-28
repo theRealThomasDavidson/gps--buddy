@@ -22,6 +22,11 @@ export type RouteProgressorOptions = {
 
 export type RouteProgressorMemory = {
   last: RouteFollowerProgress | null
+  /**
+   * Last fix used for projecting progress. Used for optional time/speed-based stability rules
+   * (e.g. forward progress caps).
+   */
+  lastFix: LocationFix | null
 }
 
 export type RouteProgressorResult = {

@@ -37,7 +37,7 @@ describe('BasicRouteProgressor', () => {
   it('degenerate route (geometry < 2) snaps to fix with zero progress', () => {
     const prog = new BasicRouteProgressor()
     const r = route([p0()])
-    const out = prog.project(r, fix(addMetersLL(p0(), 12, 3), 0), { last: null })
+    const out = prog.project(r, fix(addMetersLL(p0(), 12, 3), 0), { last: null, lastFix: null })
 
     expect(out.progress.segmentIndex).toBe(0)
     expect(out.progress.metersAlongRoute).toBe(0)
@@ -49,7 +49,7 @@ describe('BasicRouteProgressor', () => {
     const prog = new BasicRouteProgressor()
     const r = route([p0(), addMetersLL(p0(), 1000, 0)])
 
-    const a = prog.project(r, fix(addMetersLL(p0(), 100, 10), 0), { last: null })
+    const a = prog.project(r, fix(addMetersLL(p0(), 100, 10), 0), { last: null, lastFix: null })
     const b = prog.project(r, fix(addMetersLL(p0(), 300, -7), 1000), a.memory)
 
     expect(a.progress.segmentIndex).toBe(0)
@@ -70,7 +70,7 @@ describe('BasicRouteProgressor', () => {
     const r = route([o, aPt, bPt])
 
     // Put the fix slightly north of the vertex at 100m.
-    const out = prog.project(r, fix(addMetersLL(o, 100, 3), 0), { last: null })
+    const out = prog.project(r, fix(addMetersLL(o, 100, 3), 0), { last: null, lastFix: null })
 
     expect(out.progress.metersAlongRoute).toBeGreaterThan(95)
     expect(out.progress.metersAlongRoute).toBeLessThan(105)
@@ -93,7 +93,7 @@ describe('BasicRouteProgressor', () => {
     const r = route([o, east, north, westNorth])
 
     // First fix near segment0 at ~50m along.
-    const first = prog.project(r, fix(addMetersLL(o, 50, 0.6), 0), { last: null })
+    const first = prog.project(r, fix(addMetersLL(o, 50, 0.6), 0), { last: null, lastFix: null })
     expect(first.progress.segmentIndex).toBe(0)
 
     // Second fix almost identical; global best might prefer the top edge (segment2) very slightly.
@@ -109,7 +109,7 @@ describe('BasicRouteProgressor', () => {
     })
     const r = route([p0(), addMetersLL(p0(), 1000, 0)])
 
-    const first = prog.project(r, fix(addMetersLL(p0(), 200, 0), 0), { last: null })
+    const first = prog.project(r, fix(addMetersLL(p0(), 200, 0), 0), { last: null, lastFix: null })
     // Big backwards jump (GPS glitch) should clamp to at most 3m backwards.
     const second = prog.project(r, fix(addMetersLL(p0(), 150, 0), 1000), first.memory)
 
@@ -130,7 +130,7 @@ describe('BasicRouteProgressor', () => {
     for (let i = 0; i <= 200; i++) geom.push(addMetersLL(o, i * 2, 0))
     const r = route(geom)
 
-    const first = prog.project(r, fix(addMetersLL(o, 40, 3), 0), { last: null })
+    const first = prog.project(r, fix(addMetersLL(o, 40, 3), 0), { last: null, lastFix: null })
     const second = prog.project(r, fix(addMetersLL(o, 80, -2), 1000), first.memory)
     const third = prog.project(r, fix(addMetersLL(o, 120, 1), 2000), second.memory)
 
@@ -138,6 +138,21 @@ describe('BasicRouteProgressor', () => {
     expect(third.progress.metersAlongRoute).toBeGreaterThan(second.progress.metersAlongRoute)
     // Still snapped onto the baseline (lat≈0)
     expect(Math.abs(third.progress.snappedCoords.lat)).toBeLessThan(northMetersToLatDelta(0.75))
+  })
+
+  it('caps forward progress based on speed and time delta (prevents teleporting)', () => {
+    const prog = new BasicRouteProgressor()
+    const r = route([p0(), addMetersLL(p0(), 1000, 0)])
+
+    // First fix at the start.
+    const first = prog.project(r, fix(addMetersLL(p0(), 0, 0), 0, 1), { last: null, lastFix: null })
+
+    // 1s later, a bad snap jumps far ahead, but reported speed is low.
+    // Forward cap uses max(speed, 20mph) * dt * 1.5 ≈ 8.94 * 1 * 1.5 = 13.41m.
+    const second = prog.project(r, fix(addMetersLL(p0(), 200, 0), 1000, 1), first.memory)
+
+    expect(second.progress.metersAlongRoute).toBeLessThan(20)
+    expect(second.progress.metersAlongRoute).toBeGreaterThanOrEqual(0)
   })
 })
 
