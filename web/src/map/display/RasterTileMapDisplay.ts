@@ -44,6 +44,7 @@ export class RasterTileMapDisplay implements IMapDisplay {
   private readonly savedMarkers = new Map<string, maplibregl.Marker>()
   private readonly options: RasterTileMapDisplayOptions
   private userMapInteractionHandler: (() => void) | null = null
+  private navPitchDegrees: number | null = null
   private readonly onUserMapInput = (e: { originalEvent?: Event | null }) => {
     if (e.originalEvent == null) return
     this.userMapInteractionHandler?.()
@@ -131,7 +132,9 @@ export class RasterTileMapDisplay implements IMapDisplay {
 
   setCenter(center: LngLat, zoom?: number) {
     if (!this.map) return
+    if (!Number.isFinite(center.lng) || !Number.isFinite(center.lat)) return
     if (typeof zoom === 'number') {
+      if (!Number.isFinite(zoom)) return
       this.map.easeTo({ center: [center.lng, center.lat], zoom })
       return
     }
@@ -139,29 +142,42 @@ export class RasterTileMapDisplay implements IMapDisplay {
   }
 
   setNavCamera(intent: NavCameraIntent) {
+    // Route-follow “nav camera” is implemented using stable primitives, then incrementally adds
+    // camera params as we prove stability on real devices.
     const map = this.map
     if (!map) return
+    const pitch =
+      typeof intent.pitchDegrees === 'number' && Number.isFinite(intent.pitchDegrees) ? intent.pitchDegrees : null
 
-    const padding =
-      typeof intent.bottomPaddingPx === 'number'
-        ? { top: 0, left: 0, right: 0, bottom: intent.bottomPaddingPx }
-        : undefined
+    // Only apply once map is fully ready.
+    const ready = Boolean(map.loaded?.() && map.isStyleLoaded())
 
-    const opts: maplibregl.FlyToOptions & maplibregl.EaseToOptions = {
-      center: [intent.center.lng, intent.center.lat],
-      zoom: intent.zoom,
-      bearing: intent.bearingDegrees,
-      pitch: intent.pitchDegrees,
-      padding,
-      duration: intent.durationMs,
-      essential: true,
+    // Incremental step: pitch only (no bearing). If we have pitch and the map is ready,
+    // do a single atomic `jumpTo` to avoid stop/ease/stop/jump flicker.
+    if (ready && pitch !== null) {
+      const prev = this.navPitchDegrees
+      if (prev !== null && Math.abs(prev - pitch) < 0.5) {
+        // pitch already applied; keep using stable center updates
+        this.setCenter(intent.center, intent.zoom)
+        return
+      }
+
+      this.navPitchDegrees = pitch
+      try {
+        const jump: maplibregl.JumpToOptions = {
+          center: [intent.center.lng, intent.center.lat],
+          zoom: typeof intent.zoom === 'number' && Number.isFinite(intent.zoom) ? intent.zoom : undefined,
+          pitch,
+        }
+        map.jumpTo(jump)
+        return
+      } catch {
+        this.navPitchDegrees = prev
+        // fall through to stable center update
+      }
     }
 
-    if (intent.transition === 'fly') {
-      map.flyTo(opts)
-      return
-    }
-    map.easeTo(opts)
+    this.setCenter(intent.center, intent.zoom)
   }
 
   showRoute(route: Route | null) {
@@ -251,26 +267,25 @@ export class RasterTileMapDisplay implements IMapDisplay {
     const map = this.map
     if (!map) return
 
-    map.resize()
-
-    const cam = map.cameraForBounds(bounds, {
-      padding: { top: 0, right: 0, bottom: 0, left: 0 },
-      maxZoom: 16,
-    })
-
-    if (cam?.center !== undefined && cam.zoom !== undefined) {
-      map.easeTo({
-        ...cam,
-        duration: 650,
+    try {
+      const cam = map.cameraForBounds(bounds, {
+        padding: { top: 0, right: 0, bottom: 0, left: 0 },
+        maxZoom: 16,
       })
+
+      if (cam?.center !== undefined && cam.zoom !== undefined) {
+        map.jumpTo({ ...cam })
+        return
+      }
+
+      map.fitBounds(bounds, {
+        padding: { top: 0, right: 0, bottom: 0, left: 0 },
+        maxZoom: 16,
+        duration: 0,
+      })
+    } catch {
       return
     }
-
-    map.fitBounds(bounds, {
-      padding: { top: 0, right: 0, bottom: 0, left: 0 },
-      maxZoom: 16,
-      duration: 650,
-    })
   }
 
   private clearRouteLayer() {

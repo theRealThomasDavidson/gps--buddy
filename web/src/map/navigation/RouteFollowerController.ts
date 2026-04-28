@@ -1,6 +1,5 @@
 import type { IMapDisplay } from '../display/IMapDisplay'
 import type { ILocation, LocationFix, LocationWatchStop } from '../location/ILocation'
-import type { IRoutingService } from '../routing/IRoutingService'
 import type { LngLat, Route } from '../types'
 import type { IRouteProgressor, RouteProgressorMemory } from '../evaluation/IRouteProgressor'
 import type {
@@ -9,6 +8,7 @@ import type {
   RouteFollowerState,
 } from './IRouteFollowerController'
 import type { RouteDirectionStep } from '../types'
+import type { IRouteWorkflow } from '../routing/IRouteWorkflow'
 
 export type RouteFollowerControllerOptions = {
   offRouteThresholdMeters: number
@@ -34,7 +34,7 @@ const NAV_BEARING_SMOOTHING_ALPHA = 0.25
 const NAV_FOLLOW_EASE_DURATION_MS = 200
 const NAV_MIN_MOVEMENT_METERS_FOR_BEARING = 2
 const NAV_MIN_DT_MS_FOR_BEARING = 400
-const NAV_CAMERA_MIN_INTERVAL_MS = 500
+const NAV_CAMERA_MIN_INTERVAL_MS = 1000
 const NAV_CAMERA_MIN_MOVE_METERS = 1
 const NAV_CAMERA_MIN_BEARING_DELTA_DEG = 2
 
@@ -45,7 +45,7 @@ const NAV_CAMERA_MIN_BEARING_DELTA_DEG = 2
 export class RouteFollowerController implements IRouteFollowerController {
   private readonly display: IMapDisplay
   private readonly location: ILocation
-  private readonly router: IRoutingService
+  private readonly workflow: IRouteWorkflow
   private readonly progressor: IRouteProgressor
   private readonly opts: RouteFollowerControllerOptions
 
@@ -71,13 +71,13 @@ export class RouteFollowerController implements IRouteFollowerController {
   constructor(args: {
     display: IMapDisplay
     location: ILocation
-    router: IRoutingService
+    workflow: IRouteWorkflow
     progressor: IRouteProgressor
     options?: Partial<RouteFollowerControllerOptions>
   }) {
     this.display = args.display
     this.location = args.location
-    this.router = args.router
+    this.workflow = args.workflow
     this.progressor = args.progressor
     this.opts = { ...DEFAULTS, ...(args.options ?? {}) }
   }
@@ -209,7 +209,10 @@ export class RouteFollowerController implements IRouteFollowerController {
 
     try {
       const waypoints = this.buildRerouteWaypoints(fix.coords)
-      const newRoute = await this.router.route({ profile: this.state.route.profile, waypoints })
+      const newRoute = await this.workflow.routeAndRender(
+        { profile: this.state.route.profile, waypoints },
+        { fitMode: 'noFit' },
+      )
       this.state = {
         ...this.state,
         route: newRoute,
@@ -218,7 +221,6 @@ export class RouteFollowerController implements IRouteFollowerController {
       }
       this.memory = { last: null }
       this.emit()
-      // Let MapPage decide whether to call showRoute/fitRoute; the controller can later own that.
     } catch {
       this.state = { ...this.state, rerouting: false, offRouteStrikeCount: 0 }
       this.emit()
@@ -254,7 +256,7 @@ export class RouteFollowerController implements IRouteFollowerController {
 
     this.display.setNavCamera({
       center,
-      zoom: this.opts.navZoom,
+      zoom: this.lastCameraUpdateAtMs ? undefined : this.opts.navZoom,
       bearingDegrees: bearingDegrees ?? undefined,
       pitchDegrees: this.opts.navPitchDegrees,
       bottomPaddingPx: this.opts.navBottomPaddingPx,

@@ -29,6 +29,19 @@ Design notes and checkboxes live in **`project_checklist.md`** (Demo user storie
 
 We maintain a working micro-checklist in `route follower checklist.md`, including proposed contracts like `IRouteFollowerController` (controller/service) and route progress helpers, so the feature can be implemented against `IMapDisplay` and reused across raster + vector displays.
 
+Navigation UX rule (reroute camera):
+
+- If the user has taken control of the map (manual pan/zoom/tap cancels follow), reroutes update the route line + directions but **do not move the camera**.
+- If follow-route is still enabled, reroutes keep the navigation camera behavior (no “show whole route” refit).
+
+## Route following guardrails (current defaults)
+
+These are demo-friendly heuristics (tune as needed; see `route follower checklist.md`):
+
+- **Off-route detection**: `distanceToRouteMeters > 40m` for `>= 3` consecutive fixes, only when speed is at least `0.5 m/s`, with a `20s` reroute cooldown.
+- **Progress stability**: distance-window search around last match (`50m` back, `200m` forward) with hysteresis (`switchMarginMeters = 10`) and backward jitter clamp (`maxBackwardProgressMetersPerFix = 3`).
+- **Nav camera stability**: on some devices MapLibre throws internal errors during animated bearing/pitch updates; current stable follow-route camera uses `jumpTo({ center, zoom, pitch })` and avoids bearing/padding until proven stable.
+
 ## Dependency inversion boundary
 
 `MapPage` (and a future `MapPageController`) should depend only on:

@@ -55,11 +55,16 @@ export class BasicRouteProgressor implements IRouteProgressor {
     }
 
     const localRange = segmentRangeForDistanceWindow(cumulative, last.metersAlongRoute, this.opts.searchBackMeters, this.opts.searchForwardMeters)
-    const localBest = projectToBestSegment(geom, cumulative, fix.coords, localRange.startIndex, localRange.endIndex)
+    const localBest =
+      localRange.startIndex <= localRange.endIndex
+        ? projectToBestSegment(geom, cumulative, fix.coords, localRange.startIndex, localRange.endIndex)
+        : null
 
     // Hysteresis: prefer local match unless global is meaningfully closer.
     const chosen =
-      localBest.distanceToRouteMeters <= globalBest.distanceToRouteMeters + this.opts.switchMarginMeters ? localBest : globalBest
+      localBest && localBest.distanceToRouteMeters <= globalBest.distanceToRouteMeters + this.opts.switchMarginMeters
+        ? localBest
+        : globalBest
 
     const unclamped = toProgress(chosen)
     const clamped = clampProgress(unclamped, last, this.opts)
@@ -99,6 +104,7 @@ function segmentRangeForDistanceWindow(cumulative: number[], atMeters: number, b
   const endVertex = upperBound(cumulative, maxM)
   const startIndex = Math.max(0, Math.min(cumulative.length - 2, startVertex))
   const endIndex = Math.max(0, Math.min(cumulative.length - 2, endVertex))
+  if (endIndex < startIndex) return { startIndex, endIndex: startIndex }
   return { startIndex, endIndex }
 }
 

@@ -11,6 +11,18 @@ out of UI code.
 - Support cancellation (via `AbortSignal`) to avoid races
 - Normalize provider response into app `Route` type
 
+## Route rendering policy (workflow)
+
+`IRoutingService` intentionally returns **data only** (a `Route`). Rendering policy lives in a small routing-owned workflow:
+
+- `IRouteWorkflow` + `RouteWorkflow`:
+  - calls `router.route(...)`
+  - then renders via `IMapDisplay.showRoute(route)`
+  - optionally frames via `IMapDisplay.fitRoute(route)` (planning view)
+  - clears via `IMapDisplay.showRoute(null)`
+
+This keeps provider implementations UI-agnostic while centralizing **show/fit/clear** in one place.
+
 ## Proposed interface
 
 ```ts

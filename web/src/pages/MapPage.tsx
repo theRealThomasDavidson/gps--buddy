@@ -13,6 +13,8 @@ import type { GeocodeResult } from '../map/geocoding/types'
 import { BasicRouteProgressor } from '../map/evaluation/BasicRouteProgressor'
 import type { RouteFollowerState } from '../map/navigation/IRouteFollowerController'
 import { RouteFollowerController } from '../map/navigation/RouteFollowerController'
+import type { IRouteWorkflow } from '../map/routing/IRouteWorkflow'
+import { RouteWorkflow } from '../map/routing/RouteWorkflow'
 import {
   MAP_BANNER_LOADING_DELAY_MS,
   MAP_BANNER_MIN_VISIBLE_MS,
@@ -72,6 +74,7 @@ export function MapPage() {
   const routeFollowerRef = useRef<RouteFollowerController | null>(null)
   const routeFollowerUnsubRef = useRef<(() => void) | null>(null)
   const [routeFollowerState, setRouteFollowerState] = useState<RouteFollowerState | null>(null)
+  const routeWorkflowRef = useRef<IRouteWorkflow | null>(null)
 
   const location = useMemo(() => new BrowserLocation(), [])
   const geocoder = useMemo(() => createDefaultChainedGeocoder(), [])
@@ -152,6 +155,8 @@ export function MapPage() {
       controller.stop()
       return
     }
+    // Avoid competing camera loops: route-follow owns the camera while enabled.
+    stopFollowingMyLocation()
     const stops = tripStops.map((s) => s.coords).filter((c): c is LngLat => c !== null)
     controller.start({
       route: activeRoute,
@@ -159,7 +164,7 @@ export function MapPage() {
       initialCenter: lastUserCoords ?? undefined,
       initialBearingDegrees: smoothedBearingRef.current ?? undefined,
     })
-  }, [activeRoute, lastUserCoords, tripStops])
+  }, [activeRoute, lastUserCoords, stopFollowingMyLocation, tripStops])
 
   const toggleFollowMyLocation = useCallback(() => {
     const display = displayRef.current
@@ -189,10 +194,13 @@ export function MapPage() {
       routeFollowerRef.current?.stop()
     })
 
+    const workflow = new RouteWorkflow({ router, display })
+    routeWorkflowRef.current = workflow
+
     const controller = new RouteFollowerController({
       display,
       location,
-      router,
+      workflow,
       progressor,
     })
     routeFollowerRef.current = controller
@@ -270,6 +278,7 @@ export function MapPage() {
       routeFollowerRef.current?.stop()
       routeFollowerRef.current = null
       setRouteFollowerState(null)
+      routeWorkflowRef.current = null
       display.setUserMapInteractionHandler(null)
       display.unmount()
       displayRef.current = null
@@ -460,8 +469,8 @@ export function MapPage() {
   }
 
   async function runRouteWaypoints(waypoints: LngLat[]) {
-    const display = displayRef.current
-    if (!display || waypoints.length < 2) return
+    const workflow = routeWorkflowRef.current
+    if (!workflow || waypoints.length < 2) return
 
     routeAbortRef.current?.abort()
     const ac = new AbortController()
@@ -471,11 +480,13 @@ export function MapPage() {
     const bid = scheduleLoadingBanner('Routing…')
     try {
       setRouting(true)
-      const route = await router.route({ profile: 'drive', waypoints }, ac.signal)
+      const route = await workflow.routeAndRender(
+        { profile: 'drive', waypoints },
+        { fitMode: 'fitRoute' },
+        ac.signal,
+      )
       stopFollowingMyLocation()
       stopFollowingRoute()
-      display.showRoute(route)
-      display.fitRoute(route)
       setActiveRoute(route)
       const km = (route.distanceMeters ?? 0) / 1000
       const min = Math.round((route.durationSeconds ?? 0) / 60)
@@ -489,7 +500,7 @@ export function MapPage() {
         bannerSeqRef.current++
         return
       }
-      display.showRoute(null)
+      workflow.clearRenderedRoute()
       setActiveRoute(null)
       showErrorBanner(e instanceof Error ? e.message : 'Routing failed.')
     } finally {
@@ -500,7 +511,7 @@ export function MapPage() {
   function clearRoute() {
     routeAbortRef.current?.abort()
     routeAbortRef.current = null
-    displayRef.current?.showRoute(null)
+    routeWorkflowRef.current?.clearRenderedRoute()
     setActiveRoute(null)
     stopFollowingRoute()
     setMapBanner(null)
@@ -675,7 +686,7 @@ export function MapPage() {
             </div>
           </div>
 
-          {activeRoute?.steps?.length ? (
+          {(routeFollowerState?.enabled ? routeFollowerState.route : activeRoute)?.steps?.length ? (
             <div className="page__map-directions" aria-label="Directions">
               <h3 className="page__map-directions-title">Directions</h3>
               {routeFollowerState?.enabled && routeFollowerState.nextManeuver ? (
@@ -688,7 +699,9 @@ export function MapPage() {
                 </div>
               ) : null}
               <ol className="page__map-directions-list">
-                {activeRoute.steps.slice(0, 40).map((s, i) => (
+                {((routeFollowerState?.enabled ? routeFollowerState.route : activeRoute) as Route).steps!
+                  .slice(0, 40)
+                  .map((s, i) => (
                   <li key={i} className="page__map-direction">
                     <div className="page__map-direction-main">{s.instruction}</div>
                     <div className="page__map-direction-meta">

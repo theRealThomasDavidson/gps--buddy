@@ -59,12 +59,12 @@ vi.mock('maplibre-gl', () => {
     constructor() {}
   }
 
-  /** Test double for `maplibregl.Map`; internal name avoids clashing with the built-in `Map` type. */
   class MockCartoMap {
     controls: unknown[] = []
     removed = false
     easeCalls: EaseToOptions[] = []
     flyCalls: EaseToOptions[] = []
+    jumpCalls: EaseToOptions[] = []
     fitBoundsCalls: Array<{ bounds: unknown; options: unknown }> = []
     cameraForBoundsCalls: Array<{ bounds: unknown; options: unknown }> = []
     sources = new Set<string>()
@@ -75,6 +75,10 @@ vi.mock('maplibre-gl', () => {
     cameraForBoundsReturnsUndefined = false
 
     constructor() {}
+    stop() {
+      // no-op; real MapLibre cancels in-flight camera transitions
+      return this
+    }
     addControl(c: unknown) {
       this.controls.push(c)
     }
@@ -86,6 +90,9 @@ vi.mock('maplibre-gl', () => {
     }
     flyTo(opts: EaseToOptions) {
       this.flyCalls.push(opts)
+    }
+    jumpTo(opts: EaseToOptions) {
+      this.jumpCalls.push(opts)
     }
     cameraForBounds(bounds: unknown, options: unknown) {
       this.cameraForBoundsCalls.push({ bounds, options })
@@ -275,6 +282,7 @@ describe('RasterTileMapDisplay', () => {
     const map = (d as unknown as DisplayPrivates).map as {
       cameraForBoundsCalls: Array<{ bounds: { sw: [number, number]; ne: [number, number] }; options: unknown }>
       easeCalls: Array<{ duration?: number; maxZoom?: unknown }>
+      jumpCalls: Array<{ zoom?: number; bearing?: number }>
       fitBoundsCalls: unknown[]
     }
 
@@ -300,7 +308,8 @@ describe('RasterTileMapDisplay', () => {
         padding: { top: 0, right: 0, bottom: 0, left: 0 },
       }),
     )
-    expect(map.easeCalls[0]).toEqual(expect.objectContaining({ duration: 650, zoom: 10, bearing: 0 }))
+    expect(map.easeCalls.length).toBe(0)
+    expect(map.jumpCalls[0]).toEqual(expect.objectContaining({ zoom: 10, bearing: 0 }))
 
     // Min/max of vertices, then ROUTE_FIT_GEO_PADDING_FRACTION (0.1) of span padded on each side (lng span 2, lat span 1).
     const b = map.cameraForBoundsCalls[0]!.bounds
@@ -419,7 +428,7 @@ describe('RasterTileMapDisplay', () => {
       expect.objectContaining({
         maxZoom: 16,
         padding: { top: 0, right: 0, bottom: 0, left: 0 },
-        duration: 650,
+        duration: 0,
       }),
     )
     expect(map.easeCalls.length).toBe(0)
@@ -713,6 +722,7 @@ describe('RasterTileMapDisplay', () => {
       fitBoundsCalls: unknown[]
       cameraForBoundsCalls: unknown[]
       easeCalls: unknown[]
+      jumpCalls: unknown[]
       triggerLoad: () => void
     }
     map.styleLoaded = false
@@ -743,7 +753,8 @@ describe('RasterTileMapDisplay', () => {
     expect(map.layers.has('app-route-line')).toBe(true)
     expect(map.cameraForBoundsCalls.length).toBe(1)
     expect(map.fitBoundsCalls.length).toBe(0)
-    expect(map.easeCalls.length).toBeGreaterThanOrEqual(1)
+    expect(map.easeCalls.length).toBe(0)
+    expect(map.jumpCalls.length).toBeGreaterThanOrEqual(1)
   })
 })
 
