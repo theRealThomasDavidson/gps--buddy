@@ -19,6 +19,21 @@ export type MapPin = {
   accentColor?: string
 }
 
+export type NavCameraIntent = {
+  center: LngLat
+  zoom?: number
+  bearingDegrees?: number
+  pitchDegrees?: number
+  /**
+   * Pixels of padding applied to the bottom of the viewport so the user marker sits lower
+   * and more road is visible ahead.
+   */
+  bottomPaddingPx?: number
+  /** Choose a “big move” vs “follow updates” transition style. */
+  transition?: 'fly' | 'ease'
+  durationMs?: number
+}
+
 export interface IMapDisplay {
   mount(container: HTMLElement): void
   unmount(): void
@@ -27,6 +42,7 @@ export interface IMapDisplay {
   setLayers(layers: MapLayerState): void
 
   setCenter(center: LngLat, zoom?: number): void
+  setNavCamera(intent: NavCameraIntent): void
 
   showRoute(route: Route | null): void
   fitRoute(route: Route): void

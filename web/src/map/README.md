@@ -27,6 +27,8 @@ Parts of this already show up indirectly (routing, directions list, deviation id
 
 Design notes and checkboxes live in **`project_checklist.md`** (Demo user stories). When we add APIs (e.g. snap/progress or a navigation facade), document them here and in `routing/` / `evaluation/` READMEs as appropriate.
 
+We maintain a working micro-checklist in `route follower checklist.md`, including proposed contracts like `IRouteFollowerController` (controller/service) and route progress helpers, so the feature can be implemented against `IMapDisplay` and reused across raster + vector displays.
+
 ## Dependency inversion boundary
 
 `MapPage` (and a future `MapPageController`) should depend only on:

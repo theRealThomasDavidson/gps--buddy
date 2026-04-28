@@ -10,6 +10,9 @@ import { thumbtackPinGenerator } from '../map/display/ThumbtackPinGenerator'
 import { createDefaultRoutingService } from '../map/routing/createRoutingService'
 import type { LngLat, Route } from '../map/types'
 import type { GeocodeResult } from '../map/geocoding/types'
+import { BasicRouteProgressor } from '../map/evaluation/BasicRouteProgressor'
+import type { RouteFollowerState } from '../map/navigation/IRouteFollowerController'
+import { RouteFollowerController } from '../map/navigation/RouteFollowerController'
 import {
   MAP_BANNER_LOADING_DELAY_MS,
   MAP_BANNER_MIN_VISIBLE_MS,
@@ -66,10 +69,14 @@ export function MapPage() {
   const tripDragFromRef = useRef<number | null>(null)
   const followMyLocationRef = useRef(false)
   const [followingMyLocation, setFollowingMyLocation] = useState(false)
+  const routeFollowerRef = useRef<RouteFollowerController | null>(null)
+  const routeFollowerUnsubRef = useRef<(() => void) | null>(null)
+  const [routeFollowerState, setRouteFollowerState] = useState<RouteFollowerState | null>(null)
 
   const location = useMemo(() => new BrowserLocation(), [])
   const geocoder = useMemo(() => createDefaultChainedGeocoder(), [])
   const router = useMemo(() => createDefaultRoutingService(), [])
+  const progressor = useMemo(() => new BasicRouteProgressor(), [])
 
   const clearBannerTimer = useCallback(() => {
     if (bannerTimerRef.current) {
@@ -134,6 +141,26 @@ export function MapPage() {
     setFollowingMyLocation(false)
   }, [])
 
+  const stopFollowingRoute = useCallback(() => {
+    routeFollowerRef.current?.stop()
+  }, [])
+
+  const toggleFollowRoute = useCallback(() => {
+    const controller = routeFollowerRef.current
+    if (!controller || !activeRoute) return
+    if (controller.getState().enabled) {
+      controller.stop()
+      return
+    }
+    const stops = tripStops.map((s) => s.coords).filter((c): c is LngLat => c !== null)
+    controller.start({
+      route: activeRoute,
+      tripStops: stops.length ? stops : undefined,
+      initialCenter: lastUserCoords ?? undefined,
+      initialBearingDegrees: smoothedBearingRef.current ?? undefined,
+    })
+  }, [activeRoute, lastUserCoords, tripStops])
+
   const toggleFollowMyLocation = useCallback(() => {
     const display = displayRef.current
     if (!display || !lastUserCoords) return
@@ -141,10 +168,11 @@ export function MapPage() {
       stopFollowingMyLocation()
       return
     }
+    stopFollowingRoute()
     followMyLocationRef.current = true
     setFollowingMyLocation(true)
     display.setCenter(lastUserCoords, 15)
-  }, [lastUserCoords, stopFollowingMyLocation])
+  }, [lastUserCoords, stopFollowingMyLocation, stopFollowingRoute])
 
   useEffect(() => () => clearBannerTimer(), [clearBannerTimer])
 
@@ -158,7 +186,18 @@ export function MapPage() {
     display.setUserMapInteractionHandler(() => {
       followMyLocationRef.current = false
       setFollowingMyLocation(false)
+      routeFollowerRef.current?.stop()
     })
+
+    const controller = new RouteFollowerController({
+      display,
+      location,
+      router,
+      progressor,
+    })
+    routeFollowerRef.current = controller
+    routeFollowerUnsubRef.current?.()
+    routeFollowerUnsubRef.current = controller.subscribe((s) => setRouteFollowerState(s))
     setMapReady(true)
 
     // Demo behavior: center once on initial load.
@@ -226,11 +265,16 @@ export function MapPage() {
       prevFixRef.current = null
       smoothedBearingRef.current = null
       followMyLocationRef.current = false
+      routeFollowerUnsubRef.current?.()
+      routeFollowerUnsubRef.current = null
+      routeFollowerRef.current?.stop()
+      routeFollowerRef.current = null
+      setRouteFollowerState(null)
       display.setUserMapInteractionHandler(null)
       display.unmount()
       displayRef.current = null
     }
-  }, [location, resolveOpBanner, scheduleLoadingBanner, showErrorBanner])
+  }, [location, progressor, resolveOpBanner, router, scheduleLoadingBanner, showErrorBanner])
 
   useEffect(() => {
     const display = displayRef.current
@@ -429,6 +473,7 @@ export function MapPage() {
       setRouting(true)
       const route = await router.route({ profile: 'drive', waypoints }, ac.signal)
       stopFollowingMyLocation()
+      stopFollowingRoute()
       display.showRoute(route)
       display.fitRoute(route)
       setActiveRoute(route)
@@ -457,6 +502,7 @@ export function MapPage() {
     routeAbortRef.current = null
     displayRef.current?.showRoute(null)
     setActiveRoute(null)
+    stopFollowingRoute()
     setMapBanner(null)
   }
 
@@ -483,6 +529,21 @@ export function MapPage() {
             }
           >
             {followingMyLocation ? 'Following' : 'Center on me'}
+          </button>
+          <button
+            type="button"
+            onClick={toggleFollowRoute}
+            disabled={!activeRoute}
+            aria-pressed={routeFollowerState?.enabled ?? false}
+            title={
+              !activeRoute
+                ? 'Route a trip first'
+                : routeFollowerState?.enabled
+                  ? 'Stop route-follow mode'
+                  : 'Follow the routed trip'
+            }
+          >
+            {routeFollowerState?.enabled ? 'Following route' : 'Follow route'}
           </button>
         </div>
 
@@ -617,6 +678,15 @@ export function MapPage() {
           {activeRoute?.steps?.length ? (
             <div className="page__map-directions" aria-label="Directions">
               <h3 className="page__map-directions-title">Directions</h3>
+              {routeFollowerState?.enabled && routeFollowerState.nextManeuver ? (
+                <div className="page__map-next" aria-label="Next direction">
+                  <div className="page__map-next-title">Next</div>
+                  <div className="page__map-next-main">{routeFollowerState.nextManeuver.instruction}</div>
+                  <div className="page__map-next-meta">
+                    {formatMeters(routeFollowerState.nextManeuver.distanceToNextMeters)}
+                  </div>
+                </div>
+              ) : null}
               <ol className="page__map-directions-list">
                 {activeRoute.steps.slice(0, 40).map((s, i) => (
                   <li key={i} className="page__map-direction">

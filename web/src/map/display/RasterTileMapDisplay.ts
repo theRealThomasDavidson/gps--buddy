@@ -1,6 +1,6 @@
 import maplibregl, { type Map as MapLibreMap } from 'maplibre-gl'
 import type { BaseView, LngLat, MapLayerState, Route } from '../types'
-import type { IMapDisplay, MapPin, PositionFixDisplay } from './IMapDisplay'
+import type { IMapDisplay, MapPin, NavCameraIntent, PositionFixDisplay } from './IMapDisplay'
 import { thumbtackPinGenerator } from './ThumbtackPinGenerator'
 import userLocationIconUrl from '../../assets/user-location.svg'
 
@@ -94,12 +94,17 @@ export class RasterTileMapDisplay implements IMapDisplay {
     this.map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }))
     this.map.on('dragstart', this.onUserMapInput)
     this.map.on('wheel', this.onUserMapInput)
+    // Treat taps/clicks as user intent too; route-follow camera updates can otherwise “fight” interaction.
+    this.map.on('mousedown', this.onUserMapInput)
+    this.map.on('touchstart', this.onUserMapInput)
   }
 
   unmount() {
     if (this.map) {
       this.map.off('dragstart', this.onUserMapInput)
       this.map.off('wheel', this.onUserMapInput)
+      this.map.off('mousedown', this.onUserMapInput)
+      this.map.off('touchstart', this.onUserMapInput)
     }
     this.userMapInteractionHandler = null
     this.positionMarker?.remove()
@@ -131,6 +136,32 @@ export class RasterTileMapDisplay implements IMapDisplay {
       return
     }
     this.map.easeTo({ center: [center.lng, center.lat] })
+  }
+
+  setNavCamera(intent: NavCameraIntent) {
+    const map = this.map
+    if (!map) return
+
+    const padding =
+      typeof intent.bottomPaddingPx === 'number'
+        ? { top: 0, left: 0, right: 0, bottom: intent.bottomPaddingPx }
+        : undefined
+
+    const opts: maplibregl.FlyToOptions & maplibregl.EaseToOptions = {
+      center: [intent.center.lng, intent.center.lat],
+      zoom: intent.zoom,
+      bearing: intent.bearingDegrees,
+      pitch: intent.pitchDegrees,
+      padding,
+      duration: intent.durationMs,
+      essential: true,
+    }
+
+    if (intent.transition === 'fly') {
+      map.flyTo(opts)
+      return
+    }
+    map.easeTo(opts)
   }
 
   showRoute(route: Route | null) {

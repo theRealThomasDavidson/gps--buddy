@@ -5,7 +5,15 @@ import { RasterTileMapDisplay } from './RasterTileMapDisplay'
 vi.mock('maplibre-gl', () => {
   type LngLatLike = [number, number]
   type MarkerOptions = { element?: HTMLDivElement }
-  type EaseToOptions = { center: LngLatLike; zoom?: number; bearing?: number; duration?: number }
+  type EaseToOptions = {
+    center: LngLatLike
+    zoom?: number
+    bearing?: number
+    pitch?: number
+    padding?: unknown
+    duration?: number
+    essential?: boolean
+  }
 
   class LngLatBounds {
     sw: LngLatLike
@@ -56,6 +64,7 @@ vi.mock('maplibre-gl', () => {
     controls: unknown[] = []
     removed = false
     easeCalls: EaseToOptions[] = []
+    flyCalls: EaseToOptions[] = []
     fitBoundsCalls: Array<{ bounds: unknown; options: unknown }> = []
     cameraForBoundsCalls: Array<{ bounds: unknown; options: unknown }> = []
     sources = new Set<string>()
@@ -74,6 +83,9 @@ vi.mock('maplibre-gl', () => {
     }
     easeTo(opts: EaseToOptions) {
       this.easeCalls.push(opts)
+    }
+    flyTo(opts: EaseToOptions) {
+      this.flyCalls.push(opts)
     }
     cameraForBounds(bounds: unknown, options: unknown) {
       this.cameraForBoundsCalls.push({ bounds, options })
