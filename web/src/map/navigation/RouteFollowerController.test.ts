@@ -137,7 +137,7 @@ describe('RouteFollowerController', () => {
       project: (route, fix, memory): RouteProgressorResult => {
         // Always "off-route" by 100m; pretend we're at 0 along route.
         return {
-          progress: { snappedCoords: fix.coords, segmentIndex: 0, metersAlongRoute: 0, distanceToRouteMeters: 100 },
+          progress: { snappedCoords: fix.coords, segmentIndex: 0, metersAlongRoute: 30_000, distanceToRouteMeters: 100 },
           memory: { ...memory, lastFix: fix },
         }
       },
@@ -155,7 +155,14 @@ describe('RouteFollowerController', () => {
     })
 
     const r = routeWithSteps({ routeDistance: 300, stepDistances: [100, 100] })
-    controller.start({ route: r, tripStops: [{ lng: 0, lat: 0 }, { lng: 10, lat: 10 }] })
+    controller.start({
+      route: r,
+      tripStops: [
+        { lng: 0, lat: 0 },
+        { lng: 0.5, lat: 0 },
+        { lng: 1, lat: 0 },
+      ],
+    })
     expect(typeof watchCb).toBe('function')
 
     // 3 moving fixes off-route => reroute once.
@@ -169,7 +176,8 @@ describe('RouteFollowerController', () => {
 
     expect(routed.length).toBe(1)
     expect(routed[0]?.fitMode).toBe('noFit')
-    expect(routed[0]?.waypoints.length).toBe(2)
+    // current + remaining stops (mid + destination)
+    expect(routed[0]?.waypoints.length).toBe(3)
 
     nowSpy.mockRestore()
     controller.stop()

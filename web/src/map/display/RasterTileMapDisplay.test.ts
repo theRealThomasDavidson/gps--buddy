@@ -75,6 +75,8 @@ vi.mock('maplibre-gl', () => {
     cameraForBoundsReturnsUndefined = false
     cameraForBoundsThrows = false
     jumpToThrows = false
+    /** Mirrors map rotation; updated when `jumpTo` includes `bearing`. */
+    currentBearing = 0
 
     constructor() {}
     addControl(c: unknown) {
@@ -91,7 +93,13 @@ vi.mock('maplibre-gl', () => {
     }
     jumpTo(opts: EaseToOptions) {
       if (this.jumpToThrows) throw new Error('jumpTo failed')
+      if (typeof opts.bearing === 'number' && Number.isFinite(opts.bearing)) {
+        this.currentBearing = opts.bearing
+      }
       this.jumpCalls.push(opts)
+    }
+    getBearing() {
+      return this.currentBearing
     }
     cameraForBounds(bounds: unknown, options: unknown) {
       this.cameraForBoundsCalls.push({ bounds, options })
@@ -307,7 +315,7 @@ describe('RasterTileMapDisplay', () => {
     const container = document.createElement('div')
     d.mount(container)
     const map = (d as unknown as DisplayPrivates).map as {
-      jumpCalls: Array<{ pitch?: unknown; center?: unknown; zoom?: unknown }>
+      jumpCalls: Array<{ pitch?: unknown; center?: unknown; zoom?: unknown; bearing?: unknown }>
       easeCalls: Array<{ center?: unknown; zoom?: unknown }>
     }
 
@@ -318,6 +326,58 @@ describe('RasterTileMapDisplay', () => {
     expect(map.jumpCalls[0]).toEqual(expect.objectContaining({ pitch: 55, center: [1, 2], zoom: 12 }))
     expect(map.easeCalls.length).toBeGreaterThanOrEqual(1)
     expect(map.easeCalls[0]).toEqual(expect.objectContaining({ center: [3, 4], zoom: 12 }))
+  })
+
+  it('setNavCamera forwards bearing in jumpTo when bearingDegrees is finite', () => {
+    const d = new RasterTileMapDisplay()
+    const container = document.createElement('div')
+    d.mount(container)
+    const map = (d as unknown as DisplayPrivates).map as {
+      jumpCalls: Array<{ pitch?: unknown; bearing?: unknown; center?: unknown }>
+    }
+
+    d.setNavCamera({
+      center: { lng: 1, lat: 2 },
+      zoom: 12,
+      pitchDegrees: 55,
+      bearingDegrees: 12.5,
+      transition: 'ease',
+      durationMs: 200,
+    })
+
+    expect(map.jumpCalls.length).toBe(1)
+    expect(map.jumpCalls[0]).toEqual(expect.objectContaining({ pitch: 55, bearing: 12.5, center: [1, 2] }))
+  })
+
+  it('setNavCamera uses jumpTo again when pitch is stable but bearing changes beyond epsilon', () => {
+    const d = new RasterTileMapDisplay()
+    const container = document.createElement('div')
+    d.mount(container)
+    const map = (d as unknown as DisplayPrivates).map as {
+      jumpCalls: Array<{ pitch?: unknown; bearing?: unknown; center?: unknown }>
+      easeCalls: Array<{ center?: unknown }>
+    }
+
+    d.setNavCamera({
+      center: { lng: 1, lat: 2 },
+      zoom: 12,
+      pitchDegrees: 55,
+      bearingDegrees: 0,
+      transition: 'ease',
+      durationMs: 200,
+    })
+    d.setNavCamera({
+      center: { lng: 3, lat: 4 },
+      zoom: 12,
+      pitchDegrees: 55,
+      bearingDegrees: 45,
+      transition: 'ease',
+      durationMs: 200,
+    })
+
+    expect(map.jumpCalls.length).toBe(2)
+    expect(map.jumpCalls[1]).toEqual(expect.objectContaining({ pitch: 55, bearing: 45, center: [3, 4] }))
+    expect(map.easeCalls.length).toBe(0)
   })
 
   it('setNavCamera falls back to setCenter when jumpTo throws', () => {
@@ -641,6 +701,23 @@ describe('RasterTileMapDisplay', () => {
 
     expect(arrowEl.style.display).toBe('block')
     expect(arrowEl.style.transform).toBe('rotate(42deg)')
+  })
+
+  it('showPositionFix rotates direction wedge relative to map bearing (screen-forward)', () => {
+    const d = new RasterTileMapDisplay()
+    const container = document.createElement('div')
+    d.mount(container)
+    const map = (d as unknown as DisplayPrivates).map as { currentBearing: number }
+
+    map.currentBearing = 30
+    d.showPositionFix({
+      coords: { lng: -73, lat: 40 },
+      bearingDegrees: 90,
+      speedMetersPerSecond: 1,
+    })
+
+    const arrowEl = (d as unknown as DisplayPrivates).arrowEl as HTMLDivElement
+    expect(arrowEl.style.transform).toBe('rotate(60deg)')
   })
 
   it('hides the direction wedge when speed is missing/NaN, and defaults bearing to 0 when missing', () => {

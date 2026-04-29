@@ -66,6 +66,8 @@ export class RouteFollowerController implements IRouteFollowerController {
     offRouteStrikeCount: 0,
     lastRerouteAtMs: null,
     rerouting: false,
+    lastRerouteErrorAtMs: null,
+    lastRerouteErrorMessage: null,
   }
 
   constructor(args: {
@@ -100,6 +102,8 @@ export class RouteFollowerController implements IRouteFollowerController {
       offRouteStrikeCount: 0,
       rerouting: false,
       lastRerouteAtMs: null,
+      lastRerouteErrorAtMs: null,
+      lastRerouteErrorMessage: null,
     }
     this.emit()
 
@@ -142,6 +146,8 @@ export class RouteFollowerController implements IRouteFollowerController {
       offRouteStrikeCount: 0,
       rerouting: false,
       lastRerouteAtMs: null,
+      lastRerouteErrorAtMs: null,
+      lastRerouteErrorMessage: null,
     }
     this.emit()
   }
@@ -202,13 +208,17 @@ export class RouteFollowerController implements IRouteFollowerController {
     const now = Date.now()
     if (this.state.lastRerouteAtMs && now - this.state.lastRerouteAtMs < this.opts.cooldownMs) return
 
-    // v1: reroute logic depends on how we represent “remaining stops”.
-    // Keep scaffolding here; implement once UI agrees on trip semantics.
-    this.state = { ...this.state, rerouting: true, lastRerouteAtMs: now }
+    this.state = {
+      ...this.state,
+      rerouting: true,
+      lastRerouteAtMs: now,
+      lastRerouteErrorAtMs: null,
+      lastRerouteErrorMessage: null,
+    }
     this.emit()
 
     try {
-      const waypoints = this.buildRerouteWaypoints(fix.coords)
+      const waypoints = this.buildRerouteWaypoints(fix.coords, this.state.progress?.metersAlongRoute ?? null)
       const newRoute = await this.workflow.routeAndRender(
         { profile: this.state.route.profile, waypoints },
         { fitMode: 'noFit' },
@@ -219,15 +229,21 @@ export class RouteFollowerController implements IRouteFollowerController {
         rerouting: false,
         offRouteStrikeCount: 0,
       }
-      this.memory = { last: null }
+      this.memory = { last: null, lastFix: null }
       this.emit()
     } catch {
-      this.state = { ...this.state, rerouting: false, offRouteStrikeCount: 0 }
+      this.state = {
+        ...this.state,
+        rerouting: false,
+        offRouteStrikeCount: 0,
+        lastRerouteErrorAtMs: now,
+        lastRerouteErrorMessage: 'Reroute failed. Staying on your current route.',
+      }
       this.emit()
     }
   }
 
-  private buildRerouteWaypoints(current: LngLat): LngLat[] {
+  private buildRerouteWaypoints(current: LngLat, currentMetersAlongRoute: number | null): LngLat[] {
     const stops = this.state.tripStops
     if (!stops || stops.length < 2) {
       // fallback: reroute to the last point in the existing route geometry
@@ -235,8 +251,32 @@ export class RouteFollowerController implements IRouteFollowerController {
       const dest = geom && geom.length ? geom[geom.length - 1] : current
       return [current, dest]
     }
-    // v1: keep it simple — current → final destination (future: keep remaining intermediate stops)
-    return [current, stops[stops.length - 1]]
+
+    const geom = this.state.route?.geometry
+    if (!geom || geom.length < 2) return [current, stops[stops.length - 1]]
+
+    // Keep remaining intermediate stops, based on their projection along the current route geometry.
+    // This avoids accidentally dropping mid-trip waypoints when rerouting.
+    const cumulative = buildCumulativeMeters(geom)
+    const atMeters =
+      typeof currentMetersAlongRoute === 'number' && Number.isFinite(currentMetersAlongRoute)
+        ? currentMetersAlongRoute
+        : projectPointToPolylineMeters(geom, cumulative, current)
+
+    const remainingWithMeters = stops
+      .map((s, idx) => ({ idx, coords: s, metersAlongRoute: projectPointToPolylineMeters(geom, cumulative, s) }))
+      .filter((s) => s.metersAlongRoute > atMeters + 5)
+      .sort((a, b) => a.idx - b.idx)
+
+    const remainingStops = remainingWithMeters.map((s) => s.coords)
+    const dest = stops[stops.length - 1]
+
+    if (remainingStops.length === 0) return [current, dest]
+
+    // Avoid duplicating a stop that's effectively at the current fix.
+    const first = remainingStops[0]
+    const trimmed = haversineMeters(first, current) < 10 ? remainingStops.slice(1) : remainingStops
+    return trimmed.length ? [current, ...trimmed] : [current, dest]
   }
 
   private maybeDriveNavCamera(bearingDegrees: number | null, center: LngLat) {
@@ -357,6 +397,67 @@ function haversineMeters(a: LngLat, b: LngLat): number {
   const sin2 = Math.sin(dLng / 2)
   const h = sin1 * sin1 + Math.cos(lat1) * Math.cos(lat2) * sin2 * sin2
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)))
+}
+
+function buildCumulativeMeters(geom: LngLat[]): number[] {
+  const cum: number[] = new Array(geom.length).fill(0)
+  for (let i = 1; i < geom.length; i++) {
+    cum[i] = cum[i - 1] + haversineMeters(geom[i - 1], geom[i])
+  }
+  return cum
+}
+
+function projectPointToPolylineMeters(geom: LngLat[], cumulative: number[], point: LngLat): number {
+  let bestMeters = 0
+  let bestDist = Number.POSITIVE_INFINITY
+  for (let i = 0; i < geom.length - 1; i++) {
+    const a = geom[i]
+    const b = geom[i + 1]
+    const proj = projectPointToSegmentMeters(point, a, b)
+    const metersAlongRoute = cumulative[i] + proj.t * haversineMeters(a, b)
+    if (proj.distanceMeters < bestDist) {
+      bestDist = proj.distanceMeters
+      bestMeters = metersAlongRoute
+    }
+  }
+  return bestMeters
+}
+
+function projectPointToSegmentMeters(p: LngLat, a: LngLat, b: LngLat): { t: number; distanceMeters: number } {
+  const ax = 0
+  const ay = 0
+  const bx = metersEast(a, b)
+  const by = metersNorth(a, b)
+  const px = metersEast(a, p)
+  const py = metersNorth(a, p)
+
+  const ab2 = bx * bx + by * by
+  const tRaw = ab2 === 0 ? 0 : (px * bx + py * by) / ab2
+  const t = clamp01(tRaw)
+
+  const sx = ax + t * bx
+  const sy = ay + t * by
+
+  const dx = px - sx
+  const dy = py - sy
+  return { t, distanceMeters: Math.hypot(dx, dy) }
+}
+
+function metersEast(origin: LngLat, p: LngLat): number {
+  const latRad = (origin.lat * Math.PI) / 180
+  const metersPerDegLng = 111_320 * Math.cos(latRad)
+  return (p.lng - origin.lng) * metersPerDegLng
+}
+
+function metersNorth(origin: LngLat, p: LngLat): number {
+  const metersPerDegLat = 110_540
+  return (p.lat - origin.lat) * metersPerDegLat
+}
+
+function clamp01(t: number): number {
+  if (t < 0) return 0
+  if (t > 1) return 1
+  return t
 }
 
 function bearingDegrees(from: LngLat, to: LngLat): number {

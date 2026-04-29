@@ -40,7 +40,7 @@ These are demo-friendly heuristics (tune as needed; see `route follower checklis
 
 - **Off-route detection**: `distanceToRouteMeters > 40m` for `>= 3` consecutive fixes, only when speed is at least `0.5 m/s`, with a `20s` reroute cooldown.
 - **Progress stability**: distance-window search around last match (`50m` back, `200m` forward) with hysteresis (`switchMarginMeters = 10`) and backward jitter clamp (`maxBackwardProgressMetersPerFix = 3`).
-- **Nav camera stability**: on some devices MapLibre throws internal errors during animated bearing/pitch updates; current stable follow-route camera uses `jumpTo({ center, zoom, pitch })` and avoids bearing/padding until proven stable.
+- **Nav camera stability**: on some devices MapLibre throws internal errors during animated camera updates; follow-route uses a single `jumpTo({ center, zoom, pitch, bearing? })` when pitch (and optionally bearing) changes, then `easeTo` center-only updates while pitch and bearing are stable. **Bottom padding** from `NavCameraIntent` is still not applied on the raster path (deferred).
 
 ## Dependency inversion boundary
 

@@ -75,6 +75,8 @@ export function MapPage() {
   const routeFollowerUnsubRef = useRef<(() => void) | null>(null)
   const [routeFollowerState, setRouteFollowerState] = useState<RouteFollowerState | null>(null)
   const routeWorkflowRef = useRef<IRouteWorkflow | null>(null)
+  const lastRerouteErrorAtMsRef = useRef<number | null>(null)
+  const rerouteBannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const location = useMemo(() => new BrowserLocation(), [])
   const geocoder = useMemo(() => createDefaultChainedGeocoder(), [])
@@ -85,6 +87,13 @@ export function MapPage() {
     if (bannerTimerRef.current) {
       clearTimeout(bannerTimerRef.current)
       bannerTimerRef.current = null
+    }
+  }, [])
+
+  const clearRerouteBannerTimer = useCallback(() => {
+    if (rerouteBannerTimerRef.current) {
+      clearTimeout(rerouteBannerTimerRef.current)
+      rerouteBannerTimerRef.current = null
     }
   }, [])
 
@@ -180,6 +189,25 @@ export function MapPage() {
   }, [lastUserCoords, stopFollowingMyLocation, stopFollowingRoute])
 
   useEffect(() => () => clearBannerTimer(), [clearBannerTimer])
+
+  useEffect(() => () => clearRerouteBannerTimer(), [clearRerouteBannerTimer])
+
+  useEffect(() => {
+    const s = routeFollowerState
+    if (!s?.enabled) return
+    if (!s.lastRerouteErrorAtMs || !s.lastRerouteErrorMessage) return
+    if (lastRerouteErrorAtMsRef.current === s.lastRerouteErrorAtMs) return
+
+    lastRerouteErrorAtMsRef.current = s.lastRerouteErrorAtMs
+    clearRerouteBannerTimer()
+    bannerSeqRef.current++
+    setMapBannerDismissed(false)
+    setMapBanner({ tone: 'info', message: s.lastRerouteErrorMessage })
+    rerouteBannerTimerRef.current = setTimeout(() => {
+      rerouteBannerTimerRef.current = null
+      setMapBanner(null)
+    }, 3500)
+  }, [clearRerouteBannerTimer, routeFollowerState])
 
   useEffect(() => {
     const container = containerRef.current

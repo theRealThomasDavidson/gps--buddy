@@ -29,6 +29,13 @@ export type RouteFollowerState = {
   offRouteStrikeCount: number
   lastRerouteAtMs: number | null
   rerouting: boolean
+
+  /**
+   * Set when a reroute attempt fails. Intended for UI to surface a short, user-visible message.
+   * UI should treat this as an event (e.g. only show once per `lastRerouteErrorAtMs` change).
+   */
+  lastRerouteErrorAtMs: number | null
+  lastRerouteErrorMessage: string | null
 }
 
 export type RouteFollowerStartArgs = {

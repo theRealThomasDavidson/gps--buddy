@@ -3,7 +3,6 @@ import type { BaseView, LngLat, MapLayerState, Route } from '../types'
 import type { IMapDisplay, MapPin, NavCameraIntent, PositionFixDisplay } from './IMapDisplay'
 import { thumbtackPinGenerator } from './ThumbtackPinGenerator'
 import userLocationIconUrl from '../../assets/user-location.svg'
-
 /**
  * Default overlay anchoring for MapLibre markers in this app.
  *
@@ -22,8 +21,20 @@ const ROUTE_LAYER_ID = 'app-route-line'
 const ROUTE_FIT_GEO_PADDING_FRACTION = 0.1
 const ROUTE_FIT_GEO_PADDING_MIN_SPAN_DEG = 0.004
 
+/** Smallest absolute bearing delta (degrees) for “stable enough” to skip `jumpTo` and only recenter. */
+const NAV_BEARING_STABLE_EPS_DEG = 2
+
 // Debug-only: when true, render the direction wedge pointing north while stationary.
 const DEBUG_LOCK_DIRECTION_WEDGE_NORTH_WHEN_STATIONARY = false
+
+function smallestBearingDeltaDeg(a: number, b: number): number {
+  return Math.abs((((a - b) % 360) + 540) % 360 - 180)
+}
+
+/** Degrees [0, 360). */
+function normalizeHeadingDeg(deg: number): number {
+  return ((deg % 360) + 360) % 360
+}
 
 type RasterTileMapDisplayOptions = {
   /**
@@ -44,7 +55,10 @@ export class RasterTileMapDisplay implements IMapDisplay {
   private readonly savedMarkers = new Map<string, maplibregl.Marker>()
   private readonly options: RasterTileMapDisplayOptions
   private userMapInteractionHandler: (() => void) | null = null
+  /** `null` until the first successful nav `jumpTo` applies pitch (matches MapLibre state). */
   private navPitchDegrees: number | null = null
+  /** Last bearing applied via `setNavCamera` `jumpTo` (when intent included a finite bearing). */
+  private navBearingDegrees: number | null = null
   private readonly onUserMapInput = (e: { originalEvent?: Event | null }) => {
     if (e.originalEvent == null) return
     this.userMapInteractionHandler?.()
@@ -95,7 +109,6 @@ export class RasterTileMapDisplay implements IMapDisplay {
     this.map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }))
     this.map.on('dragstart', this.onUserMapInput)
     this.map.on('wheel', this.onUserMapInput)
-    // Treat taps/clicks as user intent too; route-follow camera updates can otherwise “fight” interaction.
     this.map.on('mousedown', this.onUserMapInput)
     this.map.on('touchstart', this.onUserMapInput)
   }
@@ -142,37 +155,50 @@ export class RasterTileMapDisplay implements IMapDisplay {
   }
 
   setNavCamera(intent: NavCameraIntent) {
-    // Route-follow “nav camera” is implemented using stable primitives, then incrementally adds
-    // camera params as we prove stability on real devices.
     const map = this.map
     if (!map) return
     const pitch =
-      typeof intent.pitchDegrees === 'number' && Number.isFinite(intent.pitchDegrees) ? intent.pitchDegrees : null
+      typeof intent.pitchDegrees === 'number' && 0 < intent.pitchDegrees && intent.pitchDegrees < 90 ? intent.pitchDegrees : null
 
-    // Only apply once map is fully ready.
+    const bearing =
+      typeof intent.bearingDegrees === 'number' && Number.isFinite(intent.bearingDegrees)
+        ? ((intent.bearingDegrees % 360) + 360) % 360
+        : null
+
     const ready = Boolean(map.loaded?.() && map.isStyleLoaded())
 
-    // Incremental step: pitch only (no bearing). If we have pitch and the map is ready,
-    // do a single atomic `jumpTo` to avoid stop/ease/stop/jump flicker.
+    // Nav camera: one atomic `jumpTo` for pitch ± bearing when the map is ready, then `setCenter`
+    // while pitch and (optional) bearing are stable—avoids ease/jump flicker but still rotates when heading moves.
     if (ready && pitch !== null) {
-      const prev = this.navPitchDegrees
-      if (prev !== null && Math.abs(prev - pitch) < 0.5) {
-        // pitch already applied; keep using stable center updates
+      const prevPitch = this.navPitchDegrees
+      const prevBearing = this.navBearingDegrees
+      const pitchStable = prevPitch !== null && Math.abs(prevPitch - pitch) < 0.5
+      const bearingStable =
+        bearing === null
+          ? true
+          : prevBearing !== null && smallestBearingDeltaDeg(bearing, prevBearing) < NAV_BEARING_STABLE_EPS_DEG
+
+      if (pitchStable && bearingStable) {
         this.setCenter(intent.center, intent.zoom)
         return
       }
 
+      const prevPitchForRevert = prevPitch
+      const prevBearingForRevert = prevBearing
       this.navPitchDegrees = pitch
+      if (bearing !== null) this.navBearingDegrees = bearing
       try {
         const jump: maplibregl.JumpToOptions = {
           center: [intent.center.lng, intent.center.lat],
           zoom: typeof intent.zoom === 'number' && Number.isFinite(intent.zoom) ? intent.zoom : undefined,
           pitch,
         }
+        if (bearing !== null) jump.bearing = bearing
         map.jumpTo(jump)
         return
       } catch {
-        this.navPitchDegrees = prev
+        this.navPitchDegrees = prevPitchForRevert
+        this.navBearingDegrees = prevBearingForRevert
         // fall through to stable center update
       }
     }
@@ -371,9 +397,18 @@ export class RasterTileMapDisplay implements IMapDisplay {
       const showArrow = (typeof speedMps === 'number' && speedMps >= 0.44704) || DEBUG_LOCK_DIRECTION_WEDGE_NORTH_WHEN_STATIONARY
       this.arrowEl.style.display = showArrow ? 'block' : 'none'
 
-      const bearing = typeof fix.bearingDegrees === 'number' ? fix.bearingDegrees : 0
-      // Arrow points "up" at 0° bearing; rotate clockwise.
-      this.arrowEl.style.transform = `rotate(${bearing}deg)`
+      const userBearing =
+        typeof fix.bearingDegrees === 'number' && Number.isFinite(fix.bearingDegrees) ? fix.bearingDegrees : 0
+      // True-north heading minus map rotation → wedge points “forward” on screen (MapLibre markers rotate with the map).
+      let mapBearing = 0
+      try {
+        const b = this.map.getBearing()
+        if (typeof b === 'number' && Number.isFinite(b)) mapBearing = b
+      } catch {
+        mapBearing = 0
+      }
+      const screenBearing = normalizeHeadingDeg(userBearing - mapBearing)
+      this.arrowEl.style.transform = `rotate(${screenBearing}deg)`
       // === DIRECTION ARROW ROTATION/VISIBILITY (END) ===
     }
   }
