@@ -50,7 +50,7 @@ export class RouteFollowerController implements IRouteFollowerController {
   private readonly opts: RouteFollowerControllerOptions
 
   private stopWatch: LocationWatchStop | null = null
-  private memory: RouteProgressorMemory = { last: null }
+  private memory: RouteProgressorMemory = { last: null, lastFix: null }
   private listeners = new Set<(s: RouteFollowerState) => void>()
   private prevFix: { coords: LngLat; timestampMs: number } | null = null
   private smoothedBearingDegrees: number | null = null
@@ -84,7 +84,7 @@ export class RouteFollowerController implements IRouteFollowerController {
 
   start(args: RouteFollowerStartArgs): void {
     this.stop()
-    this.memory = { last: null }
+    this.memory = { last: null, lastFix: null }
     this.prevFix = null
     this.smoothedBearingDegrees = null
     this.lastCameraUpdateAtMs = null
@@ -125,7 +125,7 @@ export class RouteFollowerController implements IRouteFollowerController {
   stop(): void {
     this.stopWatch?.()
     this.stopWatch = null
-    this.memory = { last: null }
+    this.memory = { last: null, lastFix: null }
     this.prevFix = null
     this.smoothedBearingDegrees = null
     this.lastCameraUpdateAtMs = null
@@ -290,19 +290,18 @@ export class RouteFollowerController implements IRouteFollowerController {
   }
 }
 
-function deriveNextManeuver(route: Route, metersAlongRoute: number): RouteFollowerState['nextManeuver'] {
-  const steps: RouteDirectionStep[] =
-    Array.isArray(route.steps) && route.steps.length
-      ? route.steps
-      : [
-          {
-            instruction: 'Arrive at destination',
-            distanceMeters:
-              typeof route.distanceMeters === 'number' && Number.isFinite(route.distanceMeters)
-                ? Math.max(0, route.distanceMeters - metersAlongRoute)
-                : undefined,
-          },
-        ]
+export function deriveNextManeuver(route: Route, metersAlongRoute: number): RouteFollowerState['nextManeuver'] {
+  // If the route has no steps at all, synthesize a stable “arrive” maneuver and
+  // compute remaining distance directly in route meters (no step scaling).
+  if (!Array.isArray(route.steps) || route.steps.length === 0) {
+    const remaining =
+      typeof route.distanceMeters === 'number' && Number.isFinite(route.distanceMeters)
+        ? Math.max(0, route.distanceMeters - metersAlongRoute)
+        : 0
+    return { stepIndex: 0, instruction: 'Arrive at destination', distanceToNextMeters: remaining }
+  }
+
+  const steps: RouteDirectionStep[] = route.steps
 
   // If we have usable step distances, we can estimate which step we're closest to by mapping
   // route progress → step progress.
@@ -328,13 +327,12 @@ function deriveNextManeuver(route: Route, metersAlongRoute: number): RouteFollow
 
   let cum = 0
   for (let i = 0; i < dists.length; i++) {
-    const start = cum
     const end = cum + dists[i]
     if (metersIntoSteps <= end) {
       return {
         stepIndex: i,
         instruction: steps[i].instruction,
-        distanceToNextMeters: Math.max(0, start - metersIntoSteps),
+        distanceToNextMeters: Math.max(0, end - metersIntoSteps),
       }
     }
     cum = end

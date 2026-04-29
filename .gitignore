@@ -21,6 +21,9 @@ yarn-error.log*
 # Editor noise
 .idea/
 
+# Cursor / local agent instructions (personal; do not commit)
+/AGENTS.md
+
 # Optional: editor — uncomment if you do not want team-shared VS Code settings
 # .vscode/
 
