@@ -3,29 +3,16 @@ import type { Route } from '../types'
 import type { RouteFollowerProgress } from '../navigation/IRouteFollowerController'
 
 export type RouteProgressorOptions = {
-  /**
-   * Search window behind the last match, in meters along the route.
-   * Used to keep selection stable without limiting switchbacks by segment count.
-   */
   searchBackMeters: number
-  /** Search window ahead of the last match, in meters along the route. */
   searchForwardMeters: number
-  /**
-   * Hysteresis margin: keep the local-best match unless another segment is closer by at least this much.
-   */
+
   switchMarginMeters: number
-  /** Clamp small backward jitter in meters along route per fix. */
   maxBackwardProgressMetersPerFix: number
-  /** Treat deltas smaller than this as noise. */
   progressEpsilonMeters: number
 }
 
 export type RouteProgressorMemory = {
   last: RouteFollowerProgress | null
-  /**
-   * Last fix used for projecting progress. Used for optional time/speed-based stability rules
-   * (e.g. forward progress caps).
-   */
   lastFix: LocationFix | null
 }
 

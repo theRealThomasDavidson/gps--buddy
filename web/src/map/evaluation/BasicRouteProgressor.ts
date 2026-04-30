@@ -22,11 +22,6 @@ type SegmentProjection = {
   metersAlongRoute: number
 }
 
-/**
- * Demo-friendly progressor:
- * - projects a fix to the closest point on the route polyline
- * - uses a distance-window search around last progress for stability
- */
 export class BasicRouteProgressor implements IRouteProgressor {
   private readonly opts: RouteProgressorOptions
 
@@ -37,7 +32,6 @@ export class BasicRouteProgressor implements IRouteProgressor {
   project(route: Route, fix: LocationFix, memory: RouteProgressorMemory): RouteProgressorResult {
     const geom = route.geometry
     if (geom.length < 2) {
-      // Degenerate route: treat the fix as the snapped point.
       const progress: RouteFollowerProgress = {
         snappedCoords: fix.coords,
         segmentIndex: 0,
@@ -194,7 +188,6 @@ function projectToBestSegment(geom: LngLat[], cumulative: number[], point: LngLa
     }
     if (!best || cand.distanceToRouteMeters < best.distanceToRouteMeters) best = cand
   }
-  // route has at least one segment, so best is non-null
   return best!
 }
 

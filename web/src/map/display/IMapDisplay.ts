@@ -24,12 +24,7 @@ export type NavCameraIntent = {
   zoom?: number
   bearingDegrees?: number
   pitchDegrees?: number
-  /**
-   * Pixels of padding applied to the bottom of the viewport so the user marker sits lower
-   * and more road is visible ahead.
-   */
   bottomPaddingPx?: number
-  /** Choose a “big move” vs “follow updates” transition style. */
   transition?: 'fly' | 'ease'
   durationMs?: number
 }

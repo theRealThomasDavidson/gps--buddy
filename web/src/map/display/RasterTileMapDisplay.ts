@@ -28,12 +28,12 @@ const NAV_BEARING_STABLE_EPS_DEG = 2
 const DEBUG_LOCK_DIRECTION_WEDGE_NORTH_WHEN_STATIONARY = false
 
 function smallestBearingDeltaDeg(a: number, b: number): number {
-  return Math.abs((((a - b) % 360) + 540) % 360 - 180)
+  return Math.abs(((a - b) + 540) % 360 - 180)
 }
 
 /** Degrees [0, 360). */
 function normalizeHeadingDeg(deg: number): number {
-  return ((deg % 360) + 360) % 360
+  return (deg + 360) % 360
 }
 
 type RasterTileMapDisplayOptions = {
@@ -55,9 +55,7 @@ export class RasterTileMapDisplay implements IMapDisplay {
   private readonly savedMarkers = new Map<string, maplibregl.Marker>()
   private readonly options: RasterTileMapDisplayOptions
   private userMapInteractionHandler: (() => void) | null = null
-  /** `null` until the first successful nav `jumpTo` applies pitch (matches MapLibre state). */
   private navPitchDegrees: number | null = null
-  /** Last bearing applied via `setNavCamera` `jumpTo` (when intent included a finite bearing). */
   private navBearingDegrees: number | null = null
   private readonly onUserMapInput = (e: { originalEvent?: Event | null }) => {
     if (e.originalEvent == null) return
@@ -162,13 +160,11 @@ export class RasterTileMapDisplay implements IMapDisplay {
 
     const bearing =
       typeof intent.bearingDegrees === 'number' && Number.isFinite(intent.bearingDegrees)
-        ? ((intent.bearingDegrees % 360) + 360) % 360
+        ? (intent.bearingDegrees + 360) % 360
         : null
 
     const ready = Boolean(map.loaded?.() && map.isStyleLoaded())
 
-    // Nav camera: one atomic `jumpTo` for pitch ± bearing when the map is ready, then `setCenter`
-    // while pitch and (optional) bearing are stable—avoids ease/jump flicker but still rotates when heading moves.
     if (ready && pitch !== null) {
       const prevPitch = this.navPitchDegrees
       const prevBearing = this.navBearingDegrees
@@ -199,7 +195,6 @@ export class RasterTileMapDisplay implements IMapDisplay {
       } catch {
         this.navPitchDegrees = prevPitchForRevert
         this.navBearingDegrees = prevBearingForRevert
-        // fall through to stable center update
       }
     }
 
@@ -399,7 +394,6 @@ export class RasterTileMapDisplay implements IMapDisplay {
 
       const userBearing =
         typeof fix.bearingDegrees === 'number' && Number.isFinite(fix.bearingDegrees) ? fix.bearingDegrees : 0
-      // True-north heading minus map rotation → wedge points “forward” on screen (MapLibre markers rotate with the map).
       let mapBearing = 0
       try {
         const b = this.map.getBearing()

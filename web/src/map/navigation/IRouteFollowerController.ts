@@ -30,35 +30,19 @@ export type RouteFollowerState = {
   lastRerouteAtMs: number | null
   rerouting: boolean
 
-  /**
-   * Set when a reroute attempt fails. Intended for UI to surface a short, user-visible message.
-   * UI should treat this as an event (e.g. only show once per `lastRerouteErrorAtMs` change).
-   */
   lastRerouteErrorAtMs: number | null
   lastRerouteErrorMessage: string | null
 }
 
 export type RouteFollowerStartArgs = {
   route: Route
-  /**
-   * Optional full trip stop list (including destination). When present, reroute can keep the remaining stops.
-   * For a simple A→B route, this can be omitted.
-   */
   tripStops?: LngLat[]
-  /**
-   * Optional immediate camera seed so “Follow route” can snap to the user location right away,
-   * even before we have enough movement to compute a bearing.
-   */
   initialCenter?: LngLat
   initialBearingDegrees?: number
 }
 
 export type RouteFollowerUnsubscribe = () => void
 
-/**
- * Owns “follow route” behavior (progress, next maneuver, reroute heuristics, nav camera).
- * Depends only on contracts so it can be reused across raster/vector map displays.
- */
 export interface IRouteFollowerController {
   start(args: RouteFollowerStartArgs): void
   stop(): void
@@ -66,4 +50,3 @@ export interface IRouteFollowerController {
   getState(): RouteFollowerState
   subscribe(listener: (state: RouteFollowerState) => void): RouteFollowerUnsubscribe
 }
-
