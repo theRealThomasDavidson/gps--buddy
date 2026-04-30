@@ -720,6 +720,28 @@ describe('RasterTileMapDisplay', () => {
     expect(arrowEl.style.transform).toBe('rotate(60deg)')
   })
 
+  it('showPositionFix treats map bearing as 0 when getBearing throws', () => {
+    const d = new RasterTileMapDisplay()
+    const container = document.createElement('div')
+    d.mount(container)
+    const map = (d as unknown as DisplayPrivates).map as { getBearing: () => number }
+    const orig = map.getBearing
+    map.getBearing = () => {
+      throw new Error('unavailable')
+    }
+
+    d.showPositionFix({
+      coords: { lng: -73, lat: 40 },
+      bearingDegrees: 25,
+      speedMetersPerSecond: 1,
+    })
+
+    const arrowEl = (d as unknown as DisplayPrivates).arrowEl as HTMLDivElement
+    expect(arrowEl.style.transform).toBe('rotate(25deg)')
+
+    map.getBearing = orig
+  })
+
   it('hides the direction wedge when speed is missing/NaN, and defaults bearing to 0 when missing', () => {
     const d = new RasterTileMapDisplay()
     const container = document.createElement('div')

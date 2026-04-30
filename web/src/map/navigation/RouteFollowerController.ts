@@ -343,8 +343,6 @@ export function deriveNextManeuver(route: Route, metersAlongRoute: number): Rout
 
   const steps: RouteDirectionStep[] = route.steps
 
-  // If we have usable step distances, we can estimate which step we're closest to by mapping
-  // route progress → step progress.
   const stepDistances = steps.map((s) => (typeof s.distanceMeters === 'number' && Number.isFinite(s.distanceMeters) ? s.distanceMeters : null))
   const hasAllStepDistances = stepDistances.every((d) => d !== null)
 
@@ -369,10 +367,19 @@ export function deriveNextManeuver(route: Route, metersAlongRoute: number): Rout
   for (let i = 0; i < dists.length; i++) {
     const end = cum + dists[i]
     if (metersIntoSteps <= end) {
+      const remainingToLeaveStep = Math.max(0, end - metersIntoSteps)
+      const nextIdx = i + 1
+      if (nextIdx < steps.length) {
+        return {
+          stepIndex: nextIdx,
+          instruction: steps[nextIdx].instruction,
+          distanceToNextMeters: remainingToLeaveStep,
+        }
+      }
       return {
         stepIndex: i,
         instruction: steps[i].instruction,
-        distanceToNextMeters: Math.max(0, end - metersIntoSteps),
+        distanceToNextMeters: remainingToLeaveStep,
       }
     }
     cum = end

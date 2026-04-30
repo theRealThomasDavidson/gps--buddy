@@ -57,21 +57,21 @@ describe('deriveNextManeuver', () => {
     expect(m).toEqual({ stepIndex: 0, instruction: 'Turn left', distanceToNextMeters: 0 })
   })
 
-  it('derives distance remaining in current step from step distances', () => {
+  it('shows the upcoming maneuver (next step) with distance until that transition', () => {
     // steps: [100, 200], totalSteps=300, routeTotal=600 => metersIntoSteps = metersAlongRoute * 0.5
     const r = routeWithSteps({ routeDistance: 600, stepDistances: [100, 200] })
 
     const m0 = deriveNextManeuver(r, 0)
-    expect(m0).toEqual({ stepIndex: 0, instruction: 'Step 0', distanceToNextMeters: 100 })
+    expect(m0).toEqual({ stepIndex: 1, instruction: 'Step 1', distanceToNextMeters: 100 })
 
-    const m50 = deriveNextManeuver(r, 100) // metersIntoSteps=50 => 50 remaining in step0
-    expect(m50).toEqual({ stepIndex: 0, instruction: 'Step 0', distanceToNextMeters: 50 })
+    const m50 = deriveNextManeuver(r, 100) // metersIntoSteps=50 => 50 m until end of leg leading to Step 1
+    expect(m50).toEqual({ stepIndex: 1, instruction: 'Step 1', distanceToNextMeters: 50 })
 
-    const mAtBoundary = deriveNextManeuver(r, 200) // metersIntoSteps=100 => boundary => step0 distance 0
-    expect(mAtBoundary).toEqual({ stepIndex: 0, instruction: 'Step 0', distanceToNextMeters: 0 })
+    const mAtBoundary = deriveNextManeuver(r, 200) // metersIntoSteps=100 => at Step 1 maneuver
+    expect(mAtBoundary).toEqual({ stepIndex: 1, instruction: 'Step 1', distanceToNextMeters: 0 })
 
-    const mStep1 = deriveNextManeuver(r, 300) // metersIntoSteps=150 => in step1 => end=300 => 150 remaining
-    expect(mStep1).toEqual({ stepIndex: 1, instruction: 'Step 1', distanceToNextMeters: 150 })
+    const mOnLastLeg = deriveNextManeuver(r, 300) // metersIntoSteps=150 => on final step only — no further step
+    expect(mOnLastLeg).toEqual({ stepIndex: 1, instruction: 'Step 1', distanceToNextMeters: 150 })
   })
 
   it('returns last step with distance 0 when past the end', () => {
@@ -178,6 +178,163 @@ describe('RouteFollowerController', () => {
     expect(routed[0]?.fitMode).toBe('noFit')
     // current + remaining stops (mid + destination)
     expect(routed[0]?.waypoints.length).toBe(3)
+
+    nowSpy.mockRestore()
+    controller.stop()
+  })
+
+  it('reroute without tripStops uses last route geometry point as destination', async () => {
+    const display: IMapDisplay = {
+      setNavCamera: () => {},
+      setCenter: () => {},
+      setBaseView: () => {},
+      setLayers: () => {},
+      setUserMapInteractionHandler: () => {},
+      mount: () => {},
+      unmount: () => {},
+      showRoute: () => {},
+      fitRoute: () => {},
+      showPositionFix: () => {},
+      setSearchPins: () => {},
+      setSavedPins: () => {},
+      setPinnedAddress: () => {},
+    }
+
+    let watchCb: ((fix: LocationFix) => void) | null = null
+    const location: ILocation = {
+      getCurrent: async () => mkFix({ coords: { lng: 0, lat: 0 }, tMs: 0 }),
+      watch: (cb) => {
+        watchCb = cb
+        return () => {
+          watchCb = null
+        }
+      },
+    }
+
+    const routed: LngLat[][] = []
+    const workflow: IRouteWorkflow = {
+      router: { id: 'fake', route: async () => ({ id: 'nr', provider: 't', profile: 'drive', geometry: [] }) },
+      display,
+      routeAndRender: async (req) => {
+        routed.push(req.waypoints)
+        return { id: 'nr', provider: 't', profile: req.profile, geometry: [{ lng: 0, lat: 0 }, { lng: 1, lat: 0 }] }
+      },
+      clearRenderedRoute: () => {},
+    }
+
+    const progressor: IRouteProgressor = {
+      project: (route, fix, memory): RouteProgressorResult => ({
+        progress: {
+          snappedCoords: fix.coords,
+          segmentIndex: 0,
+          metersAlongRoute: 30_000,
+          distanceToRouteMeters: 100,
+        },
+        memory: { ...memory, lastFix: fix },
+      }),
+    }
+
+    const controller = new RouteFollowerController({
+      display,
+      location,
+      workflow,
+      progressor,
+      options: { offRouteThresholdMeters: 40, minStrikes: 3, cooldownMs: 20_000 },
+    })
+
+    const r = routeWithSteps({ routeDistance: 300, stepDistances: [100, 100] })
+    controller.start({ route: r })
+
+    watchCb!(mkFix({ coords: { lng: 0, lat: 0 }, tMs: 0, speedMps: 2 }))
+    watchCb!(mkFix({ coords: { lng: 0.0001, lat: 0 }, tMs: 1000, speedMps: 2 }))
+    watchCb!(mkFix({ coords: { lng: 0.0002, lat: 0 }, tMs: 2000, speedMps: 2 }))
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(routed.length).toBe(1)
+    expect(routed[0]).toEqual([
+      { lng: 0.0002, lat: 0 },
+      { lng: 1, lat: 0 },
+    ])
+
+    controller.stop()
+  })
+
+  it('sets reroute error state when routeAndRender rejects', async () => {
+    const display: IMapDisplay = {
+      setNavCamera: () => {},
+      setCenter: () => {},
+      setBaseView: () => {},
+      setLayers: () => {},
+      setUserMapInteractionHandler: () => {},
+      mount: () => {},
+      unmount: () => {},
+      showRoute: () => {},
+      fitRoute: () => {},
+      showPositionFix: () => {},
+      setSearchPins: () => {},
+      setSavedPins: () => {},
+      setPinnedAddress: () => {},
+    }
+
+    let watchCb: ((fix: LocationFix) => void) | null = null
+    const location: ILocation = {
+      getCurrent: async () => mkFix({ coords: { lng: 0, lat: 0 }, tMs: 0 }),
+      watch: (cb) => {
+        watchCb = cb
+        return () => {
+          watchCb = null
+        }
+      },
+    }
+
+    const workflow: IRouteWorkflow = {
+      router: { id: 'fake', route: async () => ({ id: 'nr', provider: 't', profile: 'drive', geometry: [] }) },
+      display,
+      routeAndRender: async () => {
+        throw new Error('demo reroute failure')
+      },
+      clearRenderedRoute: () => {},
+    }
+
+    const progressor: IRouteProgressor = {
+      project: (route, fix, memory): RouteProgressorResult => ({
+        progress: {
+          snappedCoords: fix.coords,
+          segmentIndex: 0,
+          metersAlongRoute: 30_000,
+          distanceToRouteMeters: 100,
+        },
+        memory: { ...memory, lastFix: fix },
+      }),
+    }
+
+    const nowSpy = vi.spyOn(Date, 'now')
+    nowSpy.mockReturnValue(2_000_000)
+
+    const controller = new RouteFollowerController({
+      display,
+      location,
+      workflow,
+      progressor,
+      options: { offRouteThresholdMeters: 40, minStrikes: 3, cooldownMs: 20_000 },
+    })
+
+    const r = routeWithSteps({ routeDistance: 300, stepDistances: [100, 100] })
+    controller.start({ route: r })
+
+    watchCb!(mkFix({ coords: { lng: 0, lat: 0 }, tMs: 0, speedMps: 2 }))
+    watchCb!(mkFix({ coords: { lng: 0.0001, lat: 0 }, tMs: 1000, speedMps: 2 }))
+    watchCb!(mkFix({ coords: { lng: 0.0002, lat: 0 }, tMs: 2000, speedMps: 2 }))
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const s = controller.getState()
+    expect(s.rerouting).toBe(false)
+    expect(s.lastRerouteErrorAtMs).toBe(2_000_000)
+    expect(s.lastRerouteErrorMessage).toBe('Reroute failed. Staying on your current route.')
 
     nowSpy.mockRestore()
     controller.stop()
