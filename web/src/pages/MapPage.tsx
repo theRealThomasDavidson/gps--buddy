@@ -15,6 +15,9 @@ import type { RouteFollowerState } from '../map/navigation/IRouteFollowerControl
 import { RouteFollowerController } from '../map/navigation/RouteFollowerController'
 import type { IRouteWorkflow } from '../map/routing/IRouteWorkflow'
 import { RouteWorkflow } from '../map/routing/RouteWorkflow'
+import { WebSpeechVoiceGuidance } from '../map/voice/WebSpeechVoiceGuidance'
+import { imperialDistanceFormatter } from '../map/units/imperialDistanceFormatter'
+import { voiceHalfMileReminder, voicePromptForManeuver } from '../map/voice/navVoicePhrases'
 import {
   MAP_BANNER_LOADING_DELAY_MS,
   MAP_BANNER_MIN_VISIBLE_MS,
@@ -23,6 +26,8 @@ import {
 } from './mapBannerTiming'
 
 const SAVED_PLACES_STORAGE_KEY = 'gps.demo.savedPlaces.v1'
+const VOICE_ENABLED_STORAGE_KEY = 'gps.demo.voiceEnabled.v1'
+const HALF_MILE_METERS = 804.672
 
 type SavedPlaceV1 = {
   version: 1
@@ -77,6 +82,17 @@ export function MapPage() {
   const routeWorkflowRef = useRef<IRouteWorkflow | null>(null)
   const lastRerouteErrorAtMsRef = useRef<number | null>(null)
   const rerouteBannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const [voiceEnabled, setVoiceEnabled] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem(VOICE_ENABLED_STORAGE_KEY) === 'true'
+    } catch {
+      return false
+    }
+  })
+  const lastSpokenManeuverKeyRef = useRef<string | null>(null)
+  const lastSpokenHalfMileKeyRef = useRef<string | null>(null)
+  const lastVoiceDistanceMetersRef = useRef<number | null>(null)
 
   const location = useMemo(() => new BrowserLocation(), [])
   const geocoder = useMemo(() => createDefaultChainedGeocoder(), [])
@@ -191,6 +207,72 @@ export function MapPage() {
   useEffect(() => () => clearBannerTimer(), [clearBannerTimer])
 
   useEffect(() => () => clearRerouteBannerTimer(), [clearRerouteBannerTimer])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(VOICE_ENABLED_STORAGE_KEY, String(voiceEnabled))
+    } catch {
+      // demo-only preference
+    }
+  }, [voiceEnabled])
+
+  useEffect(() => {
+    // Treat voice state as session-scoped: if voice is toggled off or route-follow stops,
+    // clear cached “already spoken” keys so toggling back on re-announces with distance.
+    if (voiceEnabled && routeFollowerState?.enabled) return
+    lastSpokenManeuverKeyRef.current = null
+    lastSpokenHalfMileKeyRef.current = null
+    lastVoiceDistanceMetersRef.current = null
+    voice.stop()
+  }, [routeFollowerState?.enabled, voice, voiceEnabled])
+
+  useEffect(() => {
+    if (!voiceEnabled) return
+    if (!voice.isSupported()) return
+    if (!routeFollowerState?.enabled) return
+    const m = routeFollowerState.nextManeuver
+    if (!m) return
+
+    const routeId = routeFollowerState.route?.id ?? 'route'
+    const key = `${routeId}:${m.stepIndex}:${m.instruction}`
+
+    const prevKey = lastSpokenManeuverKeyRef.current
+    const prevDistance = lastVoiceDistanceMetersRef.current
+    const distanceMeters =
+      typeof m.distanceToNextMeters === 'number' && Number.isFinite(m.distanceToNextMeters) ? m.distanceToNextMeters : null
+
+    // Speak once when the maneuver changes.
+    if (prevKey !== key) {
+      lastSpokenManeuverKeyRef.current = key
+      lastSpokenHalfMileKeyRef.current = null
+      lastVoiceDistanceMetersRef.current = distanceMeters
+      voice.speak(
+        voicePromptForManeuver({
+          instruction: m.instruction,
+          distanceMeters,
+          formatter: imperialDistanceFormatter,
+        }),
+        { mode: 'replace' },
+      )
+      return
+    }
+
+    // Reminder when we cross 0.5 mi remaining (once per maneuver).
+    if (
+      distanceMeters !== null &&
+      prevDistance !== null &&
+      prevDistance > HALF_MILE_METERS &&
+      distanceMeters <= HALF_MILE_METERS &&
+      lastSpokenHalfMileKeyRef.current !== key
+    ) {
+      lastSpokenHalfMileKeyRef.current = key
+      lastVoiceDistanceMetersRef.current = distanceMeters
+      voice.speak(voiceHalfMileReminder({ instruction: m.instruction }), { mode: 'replace' })
+      return
+    }
+
+    lastVoiceDistanceMetersRef.current = distanceMeters
+  }, [routeFollowerState, voice, voiceEnabled])
 
   useEffect(() => {
     const s = routeFollowerState
@@ -722,7 +804,7 @@ export function MapPage() {
                   <div className="page__map-next-title">Next</div>
                   <div className="page__map-next-main">{routeFollowerState.nextManeuver.instruction}</div>
                   <div className="page__map-next-meta">
-                    {formatMeters(routeFollowerState.nextManeuver.distanceToNextMeters)}
+                    {imperialDistanceFormatter.formatDistance(routeFollowerState.nextManeuver.distanceToNextMeters, 'ui')}
                   </div>
                 </div>
               ) : null}
@@ -733,7 +815,7 @@ export function MapPage() {
                   <li key={i} className="page__map-direction">
                     <div className="page__map-direction-main">{s.instruction}</div>
                     <div className="page__map-direction-meta">
-                      {typeof s.distanceMeters === 'number' ? formatMeters(s.distanceMeters) : null}
+                      {typeof s.distanceMeters === 'number' ? imperialDistanceFormatter.formatDistance(s.distanceMeters, 'ui') : null}
                     </div>
                   </li>
                 ))}
@@ -931,9 +1013,5 @@ function lerpAngleDegrees(from: number, to: number, t: number) {
   return (from + delta * t + 360) % 360
 }
 
-function formatMeters(meters: number): string {
-  if (!Number.isFinite(meters)) return ''
-  if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`
-  return `${Math.round(meters)} m`
-}
+// Distance + voice phrasing live under `map/units/` and `map/voice/`.
 

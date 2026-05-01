@@ -1,7 +1,7 @@
 import type { IRoutingService } from './IRoutingService'
-import { OsrmRoutingService } from './OsrmRoutingService'
+import { ValhallaRoutingService } from './ValhallaRoutingService'
 
-/** Demo composition root: public OSRM demo backend. */
+/** Demo composition root: public Valhalla instance (FOSSGIS, no API key). */
 export function createDefaultRoutingService(): IRoutingService {
-  return new OsrmRoutingService()
+  return new ValhallaRoutingService()
 }
