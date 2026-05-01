@@ -98,6 +98,7 @@ export function MapPage() {
   const geocoder = useMemo(() => createDefaultChainedGeocoder(), [])
   const router = useMemo(() => createDefaultRoutingService(), [])
   const progressor = useMemo(() => new BasicRouteProgressor(), [])
+  const voice = useMemo(() => new WebSpeechVoiceGuidance(), [])
 
   const clearBannerTimer = useCallback(() => {
     if (bannerTimerRef.current) {
@@ -666,6 +667,14 @@ export function MapPage() {
           >
             {routeFollowerState?.enabled ? 'Following route' : 'Follow route'}
           </button>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <input
+              type="checkbox"
+              checked={voiceEnabled}
+              onChange={(e) => setVoiceEnabled(e.target.checked)}
+            />
+            Voice
+          </label>
         </div>
 
         <div className="page__map-search" aria-label="Address search">
