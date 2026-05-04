@@ -900,6 +900,7 @@ describe('RasterTileMapDisplay', () => {
 
     const a1 = markerMap.get('a')
     expect(a1).toBe(a0) // same marker instance is reused
+    if (!a1 || !b0) throw new Error('expected markers')
     expect(a1.getElement().style.color).toBe('rgb(51, 51, 51)')
     expect(a1.getElement().getAttribute('aria-label')).toBe('A2')
 

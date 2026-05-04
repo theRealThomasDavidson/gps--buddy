@@ -11,9 +11,11 @@ export type ThumbtackPaletteColor = keyof typeof DEFAULT_PALETTE
  * {@link accent}; arbitrary CSS is supported via {@link generate}.
  */
 export class ThumbtackPinGenerator {
-  constructor(
-    private readonly palette: Readonly<Record<ThumbtackPaletteColor, string>> = DEFAULT_PALETTE,
-  ) {}
+  private readonly palette: Readonly<Record<ThumbtackPaletteColor, string>>
+
+  constructor(palette: Readonly<Record<ThumbtackPaletteColor, string>> = DEFAULT_PALETTE) {
+    this.palette = palette
+  }
 
   /** CSS color string for `MapPin.accentColor` or other styling. */
   accent(name: ThumbtackPaletteColor): string {

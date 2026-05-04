@@ -23,11 +23,12 @@ function haversineMeters(a: LngLat, b: LngLat) {
 
 export class ChainedGeocoder implements IGeocoder {
   readonly id: string
+  private readonly providers: IGeocoder[]
+  private readonly options: ChainedGeocoderOptions
 
-  constructor(
-    private readonly providers: IGeocoder[],
-    private readonly options: ChainedGeocoderOptions = {},
-  ) {
+  constructor(providers: IGeocoder[], options: ChainedGeocoderOptions = {}) {
+    this.providers = providers
+    this.options = options
     this.id = `chained(${providers.map((p) => p.id).join('→')})`
   }
 

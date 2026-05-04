@@ -107,7 +107,6 @@ describe('RouteFollowerController', () => {
       showPositionFix: () => {},
       setSearchPins: () => {},
       setSavedPins: () => {},
-      setPinnedAddress: () => {},
     }
 
     let watchCb: ((fix: LocationFix) => void) | null = null
@@ -134,7 +133,7 @@ describe('RouteFollowerController', () => {
     }
 
     const progressor: IRouteProgressor = {
-      project: (route, fix, memory): RouteProgressorResult => {
+      project: (_route, fix, memory): RouteProgressorResult => {
         // Always "off-route" by 100m; pretend we're at 0 along route.
         return {
           progress: { snappedCoords: fix.coords, segmentIndex: 0, metersAlongRoute: 30_000, distanceToRouteMeters: 100 },
@@ -197,7 +196,6 @@ describe('RouteFollowerController', () => {
       showPositionFix: () => {},
       setSearchPins: () => {},
       setSavedPins: () => {},
-      setPinnedAddress: () => {},
     }
 
     let watchCb: ((fix: LocationFix) => void) | null = null
@@ -223,7 +221,7 @@ describe('RouteFollowerController', () => {
     }
 
     const progressor: IRouteProgressor = {
-      project: (route, fix, memory): RouteProgressorResult => ({
+      project: (_route, fix, memory): RouteProgressorResult => ({
         progress: {
           snappedCoords: fix.coords,
           segmentIndex: 0,
@@ -275,7 +273,6 @@ describe('RouteFollowerController', () => {
       showPositionFix: () => {},
       setSearchPins: () => {},
       setSavedPins: () => {},
-      setPinnedAddress: () => {},
     }
 
     let watchCb: ((fix: LocationFix) => void) | null = null
@@ -299,7 +296,7 @@ describe('RouteFollowerController', () => {
     }
 
     const progressor: IRouteProgressor = {
-      project: (route, fix, memory): RouteProgressorResult => ({
+      project: (_route, fix, memory): RouteProgressorResult => ({
         progress: {
           snappedCoords: fix.coords,
           segmentIndex: 0,

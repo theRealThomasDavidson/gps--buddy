@@ -46,7 +46,7 @@ const SHAPE_W2_W3 = encodePolyline6([W2, W3])
 
 describe('ValhallaRoutingService', () => {
   it('POSTs costing from profile (auto / pedestrian / bicycle)', async () => {
-    const fetchMock = vi.fn(async () => ({
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({
       ok: true,
       status: 200,
       json: async () => ({
@@ -67,7 +67,8 @@ describe('ValhallaRoutingService', () => {
     await svc.route({ profile: 'bike', waypoints: wps })
 
     const bodies = fetchMock.mock.calls.map((c) => {
-      const init = c[1] as RequestInit
+      const init = c[1] as RequestInit | undefined
+      if (init?.body == null) throw new Error('expected JSON body on fetch')
       return JSON.parse(String(init.body))
     })
     expect(bodies[0].costing).toBe('auto')

@@ -200,7 +200,8 @@ export class RouteFollowerController implements IRouteFollowerController {
   }
 
   private async maybeReroute(fix: LocationFix, distanceToRouteMeters: number, strikes: number) {
-    if (!this.state.route) return
+    const activeRoute = this.state.route
+    if (!activeRoute) return
     if (this.state.rerouting) return
     if (strikes < this.opts.minStrikes) return
     if (distanceToRouteMeters <= this.opts.offRouteThresholdMeters) return
@@ -220,7 +221,7 @@ export class RouteFollowerController implements IRouteFollowerController {
     try {
       const waypoints = this.buildRerouteWaypoints(fix.coords, this.state.progress?.metersAlongRoute ?? null)
       const newRoute = await this.workflow.routeAndRender(
-        { profile: this.state.route.profile, waypoints },
+        { profile: activeRoute.profile, waypoints },
         { fitMode: 'noFit' },
       )
       this.state = {

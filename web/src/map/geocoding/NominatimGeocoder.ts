@@ -10,8 +10,11 @@ type NominatimItem = {
 
 export class NominatimGeocoder implements IGeocoder {
   readonly id = 'nominatim'
+  private readonly options: { contactEmail?: string }
 
-  constructor(private readonly options: { contactEmail?: string } = {}) {}
+  constructor(options: { contactEmail?: string } = {}) {
+    this.options = options
+  }
 
   async geocode(query: string, signal?: AbortSignal): Promise<GeocodeResult[]> {
     const trimmed = query.trim()
