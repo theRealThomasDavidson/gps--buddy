@@ -880,3 +880,72 @@
 .page--options {
   text-align: left;
 }
+
+.page--license {
+  text-align: left;
+}
+
+.page__license {
+  flex: 1;
+  padding: 1.25rem 1rem 2rem;
+  max-width: 42rem;
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.page__license-lede {
+  margin: 0 0 1.25rem;
+  font-size: 0.95rem;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.page__license-section {
+  margin-bottom: 1.5rem;
+}
+
+.page__license-section h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+  font-weight: 650;
+  color: var(--text-h);
+}
+
+.page__license-section p,
+.page__license-section li {
+  margin: 0 0 0.65rem;
+  font-size: 0.95rem;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.page__license-section a {
+  color: var(--accent);
+}
+
+.page__license-list {
+  margin: 0.5rem 0 0;
+  padding-left: 1.2rem;
+}
+
+.page__license-list li + li {
+  margin-top: 0.45rem;
+}
+
+.page__license-pre {
+  margin: 0.75rem 0 0;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.04);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.page__bar-links {
+  text-align: right;
+}

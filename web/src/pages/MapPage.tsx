@@ -633,7 +633,11 @@ export function MapPage() {
       <header className="page__bar">
         <Link to="/">Home</Link>
         <span className="page__bar-title">Map</span>
-        <Link to="/options">Options</Link>
+        <span className="page__bar-links">
+          <Link to="/options">Options</Link>
+          {' · '}
+          <Link to="/license">License</Link>
+        </span>
       </header>
       <div className="page__map-wrap">
         <div className="page__map-tools" aria-label="Map tools">

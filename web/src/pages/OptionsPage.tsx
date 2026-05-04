@@ -166,6 +166,9 @@ export function OptionsPage() {
             Saving preferences is not wired yet; controls are for layout and copy
             review only.
           </p>
+          <p className="options__hint">
+            <Link to="/license">License &amp; attribution</Link>
+          </p>
         </form>
       </main>
     </div>

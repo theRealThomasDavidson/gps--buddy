@@ -42,6 +42,8 @@ export function HomePage() {
         </Link>
         <nav className="page__subnav" aria-label="Secondary">
           <Link to="/options">Options</Link>
+          {' · '}
+          <Link to="/license">License</Link>
         </nav>
       </header>
 
