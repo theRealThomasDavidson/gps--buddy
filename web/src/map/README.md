@@ -15,11 +15,8 @@ The goal is to keep the UI SOLID:
 - `geocoding/` — text → coordinates (`IGeocoder`)
 - `routing/` — `IRoutingService` + demo **`ValhallaRoutingService`** (`createDefaultRoutingService`; optional **`OsrmRoutingService`**)
 - `evaluation/` — compute metrics and quality checks on returned routes
-<<<<<<< Updated upstream
-=======
 - `units/` — distance formatting/conversions (metric vs imperial)
 - `voice/` — optional voice guidance for navigation prompts (`SpeechSynthesis` on web)
->>>>>>> Stashed changes
 - `preload/` — optional warming/preload of map assets or provider capabilities
 - `types.ts` — shared types used across contracts
 

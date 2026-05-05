@@ -63,7 +63,11 @@ export interface IRoutingServiceWithCapabilities extends IRoutingService {
 ## Implementations (web)
 
 - **`IRoutingService`** — `IRoutingService.ts`
-- **`ValhallaRoutingService`** — `ValhallaRoutingService.ts` POSTs to the public **Valhalla** host `valhalla1.openstreetmap.de` (FOSSGIS). Returns polyline6 geometry (decoded in-app). Development only; no API key; see [FOSSGIS Valhalla announcement](https://www.fossgis.de/news/2021-11-12_funding_valhalla/).
+- **`ValhallaRoutingService`** — `ValhallaRoutingService.ts` routes via:
+  - **development**: direct POST to the public **Valhalla** host `valhalla1.openstreetmap.de` (FOSSGIS)
+  - **production (Vercel)**: same-origin proxy `POST /api/valhalla/route` (avoids CORS/preflight failures)
+  
+  Returns polyline6 geometry (decoded in-app). Development only; no API key; see [FOSSGIS Valhalla announcement](https://www.fossgis.de/news/2021-11-12_funding_valhalla/).
 - **`decodePolyline6`** — `decodePolyline6.ts` decodes Valhalla’s default **polyline6** leg shapes into `LngLat[]`.
 - **`OsrmRoutingService`** — `OsrmRoutingService.ts` remains available for experiments (public OSRM demo); not used by `createDefaultRoutingService()`.
 - **`createDefaultRoutingService()`** — `createRoutingService.ts` returns the FOSSGIS Valhalla client.
