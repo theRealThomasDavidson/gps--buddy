@@ -46,7 +46,7 @@ const SHAPE_W2_W3 = encodePolyline6([W2, W3])
 
 describe('ValhallaRoutingService', () => {
   it('POSTs costing from profile (auto / pedestrian / bicycle)', async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({
+    const fetchMock = vi.fn(async () => ({
       ok: true,
       status: 200,
       json: async () => ({

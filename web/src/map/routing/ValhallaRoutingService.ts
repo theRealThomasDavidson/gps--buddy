@@ -4,6 +4,13 @@ import type { LngLat, Route, RouteDirectionStep, RouteProfile, RouteRequest } fr
 
 /** FOSSGIS public Valhalla HTTP API (see https://www.fossgis.de/news/2021-11-12_funding_valhalla/). */
 const VALHALLA_FOSSGIS_ROUTE_URL = 'https://valhalla1.openstreetmap.de/route'
+const VERCEL_PROXY_ROUTE_URL = '/api/valhalla/route'
+
+function defaultRouteUrl(): string {
+  // Production runs on Vercel where the Valhalla public host does not set permissive CORS headers.
+  // Use a same-origin serverless proxy so the browser avoids cross-origin preflights.
+  return import.meta.env.PROD ? VERCEL_PROXY_ROUTE_URL : VALHALLA_FOSSGIS_ROUTE_URL
+}
 
 function valhallaCosting(profile: RouteProfile): string {
   switch (profile) {
@@ -46,7 +53,7 @@ export class ValhallaRoutingService implements IRoutingService {
   readonly id = 'valhalla-fossgis'
   private readonly routeUrl: string
 
-  constructor(routeUrl: string = VALHALLA_FOSSGIS_ROUTE_URL) {
+  constructor(routeUrl: string = defaultRouteUrl()) {
     this.routeUrl = routeUrl
   }
 
